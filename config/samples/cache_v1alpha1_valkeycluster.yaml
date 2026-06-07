@@ -1,0 +1,28 @@
+apiVersion: cache.wellcake.io/v1alpha1
+kind: ValkeyCluster
+metadata:
+  name: vk-sample
+  labels:
+    app.kubernetes.io/name: valkey-operator
+    app.kubernetes.io/managed-by: kustomize
+spec:
+  topology: Replication
+  image: valkey/valkey:8.0
+  replicas: 3
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+  storage:
+    size: 5Gi
+    mode: rdb
+  auth:
+    enabled: true
+  metrics:
+    enabled: true
+  config:
+    maxmemory-policy: allkeys-lru
+    timeout: "0"

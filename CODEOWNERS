@@ -1,0 +1,17 @@
+# Code ownership / required review.
+# Changes to data-correctness-critical paths require review from a maintainer
+# familiar with Valkey internals.
+#
+# TODO(bus-factor): add a SECOND maintainer here — a single owner is exactly the
+# risk this file is meant to mitigate. See CONTRIBUTING.md.
+
+* @melancholictheory
+
+# Critical for data correctness — failover, cluster bootstrap/scale/reshard,
+# rendered resources and the conversion API. Never merge without maintainer review.
+/internal/controller/failover.go                  @melancholictheory
+/internal/controller/cluster.go                   @melancholictheory
+/internal/controller/resources.go                 @melancholictheory
+/internal/controller/valkeycluster_controller.go  @melancholictheory
+/internal/controller/backup.go                    @melancholictheory
+/api/                                              @melancholictheory

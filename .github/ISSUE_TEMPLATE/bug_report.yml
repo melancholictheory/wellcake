@@ -1,0 +1,66 @@
+name: Bug report
+description: Report a problem with the operator
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report. Please fill in as much
+        of the form below as you can — it helps us reproduce and fix the issue.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear and concise description of the bug, including the impact.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How can we reproduce it?
+      description: Steps to reproduce, ideally with a minimal ValkeyCluster manifest.
+      placeholder: |
+        1. Apply this ValkeyCluster: ...
+        2. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Operator logs / events
+      description: Relevant `kubectl logs` from the operator and `kubectl describe` output. Redact any secrets.
+      render: shell
+  - type: input
+    id: operator-version
+    attributes:
+      label: Operator version / image tag
+      placeholder: "ghcr.io/melancholictheory/wellcake:latest (sha-...)"
+    validations:
+      required: true
+  - type: input
+    id: valkey-version
+    attributes:
+      label: Valkey version
+      placeholder: "9.1.0"
+  - type: input
+    id: topology
+    attributes:
+      label: Topology
+      placeholder: "Cluster / Replication / Sentinel / Standalone"
+  - type: input
+    id: k8s-version
+    attributes:
+      label: Kubernetes version
+      placeholder: "v1.31.0 (kind / k3d / EKS / ...)"
+    validations:
+      required: true
+  - type: textarea
+    id: anything-else
+    attributes:
+      label: Anything else?

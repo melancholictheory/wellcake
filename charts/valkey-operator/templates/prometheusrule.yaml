@@ -1,0 +1,116 @@
+{{- if and .Values.metrics.enabled .Values.metrics.prometheusRule.enabled -}}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "valkey-operator.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "valkey-operator.labels" . | nindent 4 }}
+    {{- with .Values.metrics.prometheusRule.additionalLabels }}
+      {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: valkey-operator.rules
+      rules:
+        - alert: ValkeyClusterShardsUnhealthy
+          expr: sum by (namespace, cluster) (valkey_operator_cluster_shards{health=~"Down|Degraded"}) > 0
+          for: {{ .Values.metrics.prometheusRule.shardsUnhealthyFor }}
+          labels:
+            severity: warning
+          annotations:
+            summary: "Valkey cluster {{ `{{ $labels.namespace }}/{{ $labels.cluster }}` }} has unhealthy shards"
+            description: "{{ `{{ $value }}` }} shard(s) reporting Down/Degraded for more than {{ .Values.metrics.prometheusRule.shardsUnhealthyFor }}."
+        - alert: ValkeyOperatorReconcileErrors
+          expr: sum by (controller) (rate(valkey_operator_reconcile_total{result="error"}[5m])) > 0
+          for: {{ .Values.metrics.prometheusRule.reconcileErrorsFor }}
+          labels:
+            severity: warning
+          annotations:
+            summary: "valkey-operator {{ `{{ $labels.controller }}` }} reconcile errors"
+            description: "Reconcile error rate above zero for more than {{ .Values.metrics.prometheusRule.reconcileErrorsFor }}; check operator logs."
+        - alert: ValkeyClusterBootstrapFailing
+          expr: increase(valkey_operator_cluster_bootstrap_total{result="failure"}[15m]) > 0
+          labels:
+            severity: critical
+          annotations:
+            summary: "Valkey cluster bootstrap failing in {{ `{{ $labels.namespace }}/{{ $labels.cluster }}` }}"
+            description: "valkey-cli --cluster create Job reported failure in the last 15m; the cluster is not initialized."
+        - alert: ValkeyClusterScaleFailing
+          expr: increase(valkey_operator_cluster_scale_total{result="failure"}[15m]) > 0
+          labels:
+            severity: warning
+          annotations:
+            summary: "Valkey cluster scale {{ `{{ $labels.direction }}` }} failing in {{ `{{ $labels.namespace }}/{{ $labels.cluster }}` }}"
+            description: "A cluster scale {{ `{{ $labels.direction }}` }} Job reported failure in the last 15m."
+        - alert: ValkeyFailoverFlapping
+          expr: increase(valkey_operator_failover_total{kind="promotion"}[1h]) > 2
+          labels:
+            severity: warning
+          annotations:
+            summary: "Valkey primary flapping in {{ `{{ $labels.namespace }}/{{ $labels.cluster }}` }}"
+            description: "More than 2 operator-driven primary promotions in the last hour — the primary is unstable (network, OOM, or an undersized replication backlog forcing repeated full resyncs). Check pod health and INFO replication."
+    # Data-plane alerts. These fire on the per-instance redis_exporter metrics
+    # scraped via each cluster's ServiceMonitor (spec.metrics.serviceMonitor).
+    # They are inert until at least one Valkey instance is scraped, so they are
+    # safe to ship unconditionally. Series carry the standard ServiceMonitor
+    # target labels (namespace, pod). Mirrors the monitoring checklist from the
+    # Valkey internals review (chobostar/valkey-analysis).
+    - name: valkey-dataplane.rules
+      rules:
+        - alert: ValkeyInstanceDown
+          expr: redis_up == 0
+          for: {{ .Values.metrics.prometheusRule.instanceDownFor }}
+          labels:
+            severity: critical
+          annotations:
+            summary: "Valkey instance {{ `{{ $labels.namespace }}/{{ $labels.pod }}` }} is down"
+            description: "redis_exporter cannot reach the Valkey instance for more than {{ .Values.metrics.prometheusRule.instanceDownFor }}."
+        - alert: ValkeyReplicaLinkDown
+          expr: redis_master_link_up == 0
+          for: {{ .Values.metrics.prometheusRule.replicaLinkDownFor }}
+          labels:
+            severity: warning
+          annotations:
+            summary: "Valkey replica {{ `{{ $labels.namespace }}/{{ $labels.pod }}` }} lost its primary link"
+            description: "master_link_status is down — the replica is not receiving the command stream. Risk of stale reads and a slow failover."
+        - alert: ValkeyClusterStateNotOk
+          expr: (redis_cluster_enabled == 1) and (redis_cluster_state == 0)
+          for: {{ .Values.metrics.prometheusRule.clusterStateNotOkFor }}
+          labels:
+            severity: critical
+          annotations:
+            summary: "Valkey cluster_state not ok for {{ `{{ $labels.namespace }}/{{ $labels.pod }}` }}"
+            description: "cluster_state:fail — uncovered slots or a minority partition. Cluster rejects writes (CLUSTERDOWN)."
+        - alert: ValkeyMemoryNearMaxmemory
+          expr: redis_memory_max_bytes > 0 and (redis_memory_used_bytes / redis_memory_max_bytes) > {{ .Values.metrics.prometheusRule.memoryHighRatio }}
+          for: {{ .Values.metrics.prometheusRule.memoryHighFor }}
+          labels:
+            severity: warning
+          annotations:
+            summary: "Valkey {{ `{{ $labels.namespace }}/{{ $labels.pod }}` }} near maxmemory"
+            description: "used_memory is above {{ .Values.metrics.prometheusRule.memoryHighRatio }} of maxmemory — eviction (cache) or write rejection / OOM (durable) is imminent."
+        - alert: ValkeyHighFragmentation
+          expr: redis_mem_fragmentation_ratio > {{ .Values.metrics.prometheusRule.fragmentationRatio }}
+          for: {{ .Values.metrics.prometheusRule.fragmentationFor }}
+          labels:
+            severity: warning
+          annotations:
+            summary: "Valkey {{ `{{ $labels.namespace }}/{{ $labels.pod }}` }} memory fragmentation high"
+            description: "mem_fragmentation_ratio above {{ .Values.metrics.prometheusRule.fragmentationRatio }}. Consider MEMORY PURGE / active-defrag, or a scheduled restart."
+        - alert: ValkeyRdbBgsaveFailing
+          expr: redis_rdb_last_bgsave_status == 0
+          for: {{ .Values.metrics.prometheusRule.bgsaveFailingFor }}
+          labels:
+            severity: critical
+          annotations:
+            summary: "Valkey {{ `{{ $labels.namespace }}/{{ $labels.pod }}` }} last BGSAVE failed"
+            description: "rdb_last_bgsave_status is error — snapshots (and disk-based replication/backups) are failing. Check disk space and permissions."
+        - alert: ValkeyFullResyncStorm
+          expr: increase(redis_sync_full[1h]) > {{ .Values.metrics.prometheusRule.fullResyncPerHour }}
+          labels:
+            severity: warning
+          annotations:
+            summary: "Valkey {{ `{{ $labels.namespace }}/{{ $labels.pod }}` }} doing frequent full resyncs"
+            description: "More than {{ .Values.metrics.prometheusRule.fullResyncPerHour }} full resyncs in the last hour — the replication backlog is likely too small for the pod-churn/write rate (see repl-backlog-size)."
+{{- end }}

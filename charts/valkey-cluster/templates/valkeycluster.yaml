@@ -1,0 +1,136 @@
+apiVersion: cache.wellcake.io/v1alpha1
+kind: ValkeyCluster
+metadata:
+  name: {{ include "valkey-cluster.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "valkey-cluster.labels" . | nindent 4 }}
+spec:
+  topology: {{ .Values.topology }}
+  profile: {{ .Values.profile }}
+  image: {{ .Values.image | quote }}
+  imagePullPolicy: {{ .Values.imagePullPolicy }}
+  replicas: {{ .Values.replicas }}
+  {{- if eq .Values.topology "Cluster" }}
+  shards: {{ .Values.shards }}
+  replicasPerShard: {{ .Values.replicasPerShard }}
+  autoReshard: {{ .Values.autoReshard }}
+  {{- end }}
+  {{- with .Values.resources }}
+  resources:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- if or .Values.storage.size .Values.storage.storageClassName .Values.storage.mode }}
+  storage:
+    {{- if .Values.storage.size }}
+    size: {{ .Values.storage.size }}
+    {{- end }}
+    {{- if .Values.storage.storageClassName }}
+    storageClassName: {{ .Values.storage.storageClassName | quote }}
+    {{- end }}
+    {{- if .Values.storage.mode }}
+    mode: {{ .Values.storage.mode }}
+    {{- end }}
+  {{- end }}
+  auth:
+    enabled: {{ .Values.auth.enabled }}
+    {{- if .Values.auth.existingSecret }}
+    existingSecret: {{ .Values.auth.existingSecret | quote }}
+    {{- end }}
+  {{- if .Values.tls.enabled }}
+  tls:
+    enabled: true
+    {{- if .Values.tls.existingSecret }}
+    existingSecret: {{ .Values.tls.existingSecret | quote }}
+    {{- end }}
+    {{- if .Values.tls.issuerRef.name }}
+    issuerRef:
+      name: {{ .Values.tls.issuerRef.name }}
+      kind: {{ .Values.tls.issuerRef.kind }}
+    {{- end }}
+  {{- end }}
+  metrics:
+    enabled: {{ .Values.metrics.enabled }}
+    {{- if .Values.metrics.image }}
+    image: {{ .Values.metrics.image | quote }}
+    {{- end }}
+    serviceMonitor: {{ .Values.metrics.serviceMonitor }}
+  {{- with .Values.config }}
+  config:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- if eq .Values.topology "Sentinel" }}
+  sentinel:
+    replicas: {{ .Values.sentinel.replicas }}
+    {{- if .Values.sentinel.quorum }}
+    quorum: {{ .Values.sentinel.quorum }}
+    {{- end }}
+    {{- if .Values.sentinel.image }}
+    image: {{ .Values.sentinel.image | quote }}
+    {{- end }}
+  {{- end }}
+  {{- with .Values.nodeSelector }}
+  nodeSelector:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.tolerations }}
+  tolerations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.affinity }}
+  affinity:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.topologySpreadConstraints }}
+  topologySpreadConstraints:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- if or (kindIs "bool" .Values.podDisruptionBudget.enabled) .Values.podDisruptionBudget.maxUnavailable }}
+  podDisruptionBudget:
+    {{- if kindIs "bool" .Values.podDisruptionBudget.enabled }}
+    enabled: {{ .Values.podDisruptionBudget.enabled }}
+    {{- end }}
+    {{- if .Values.podDisruptionBudget.maxUnavailable }}
+    maxUnavailable: {{ .Values.podDisruptionBudget.maxUnavailable }}
+    {{- end }}
+  {{- end }}
+  {{- if .Values.networkPolicy.enabled }}
+  networkPolicy:
+    enabled: true
+    {{- with .Values.networkPolicy.allowFrom }}
+    allowFrom:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+  {{- end }}
+  {{- if .Values.backup.enabled }}
+  backup:
+    enabled: true
+    schedule: {{ .Values.backup.schedule | quote }}
+    {{- if hasKey .Values.backup "retention" }}
+    retention: {{ .Values.backup.retention }}
+    {{- end }}
+    {{- if .Values.backup.image }}
+    image: {{ .Values.backup.image | quote }}
+    {{- end }}
+    {{- if .Values.backup.awsCLIImage }}
+    awsCLIImage: {{ .Values.backup.awsCLIImage | quote }}
+    {{- end }}
+    s3:
+      bucket: {{ required "backup.s3.bucket required" .Values.backup.s3.bucket | quote }}
+      {{- if .Values.backup.s3.endpoint }}
+      endpoint: {{ .Values.backup.s3.endpoint | quote }}
+      {{- end }}
+      {{- if .Values.backup.s3.region }}
+      region: {{ .Values.backup.s3.region | quote }}
+      {{- end }}
+      {{- if .Values.backup.s3.prefix }}
+      prefix: {{ .Values.backup.s3.prefix | quote }}
+      {{- end }}
+      credentialsSecret: {{ required "backup.s3.credentialsSecret required" .Values.backup.s3.credentialsSecret | quote }}
+      {{- if .Values.backup.s3.encryption }}
+      encryption: {{ .Values.backup.s3.encryption | quote }}
+      {{- end }}
+      {{- if .Values.backup.s3.kmsKeyId }}
+      kmsKeyId: {{ .Values.backup.s3.kmsKeyId | quote }}
+      {{- end }}
+  {{- end }}

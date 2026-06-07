@@ -1,0 +1,17 @@
+apiVersion: v2
+name: valkey-operator
+description: Kubernetes operator for managing Valkey clusters
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - valkey
+  - redis
+  - cache
+  - operator
+home: https://github.com/melancholictheory/wellcake
+sources:
+  - https://github.com/melancholictheory/wellcake
+maintainers:
+  - name: The Wellcake Authors
+    url: https://github.com/melancholictheory/wellcake

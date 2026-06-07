@@ -1,0 +1,108 @@
+## valkey-cluster Helm values
+##
+## Requires valkey-operator (CRD cache.wellcake.io/v1alpha1) installed in the cluster.
+
+nameOverride: ""
+fullnameOverride: ""
+
+# Topology: Standalone | Replication | Sentinel | Cluster
+topology: Replication
+
+# Profile: Cache | Durable.
+#  Cache    — allkeys-lru, persistence off, small PVC (1Gi default)
+#  Durable  — noeviction, RDB+AOF, larger PVC (10Gi default)
+profile: Cache
+
+# Valkey image and pull policy.
+image: valkey/valkey:8.0
+imagePullPolicy: IfNotPresent
+
+# Number of pods (interpretation depends on topology).
+replicas: 3
+
+# Cluster-mode only.
+shards: 3
+replicasPerShard: 1
+# Auto-rebalance slots on scale-up/scale-down so changing `shards` converges
+# without a manual reshard. Set false to keep reshard a deliberate step.
+autoReshard: true
+
+# Resources for the Valkey container.
+# maxmemory is auto-set by the operator at 60% of limits.memory.
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 1Gi
+
+# Persistence. Cache profile defaults to a tiny PVC and no on-disk writes.
+storage:
+  # Leave empty to use profile defaults (Cache=1Gi, Durable=10Gi).
+  size: ""
+  storageClassName: ""
+  # Mode: rdb | aof | both | none. Empty → profile default.
+  mode: ""
+
+auth:
+  enabled: true
+  existingSecret: ""
+
+tls:
+  enabled: false
+  existingSecret: ""
+  issuerRef:
+    name: ""
+    kind: Issuer
+
+metrics:
+  enabled: true
+  image: ""
+  serviceMonitor: false
+
+# Free-form Valkey config directives appended to valkey.conf.
+config: {}
+  # maxmemory-policy: allkeys-lru
+  # timeout: "0"
+
+# Sentinel topology specifics (only used when topology=Sentinel).
+sentinel:
+  replicas: 3
+  quorum: 0
+  image: ""
+
+# Pod scheduling.
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []
+
+podDisruptionBudget:
+  # Enabled defaults to true when replicas>1.
+  enabled: null
+  maxUnavailable: 1
+
+networkPolicy:
+  enabled: false
+  allowFrom: []
+
+backup:
+  enabled: false
+  schedule: "0 3 * * *"
+  retention: 7         # 0 = keep forever
+  image: ""
+  awsCLIImage: ""
+  s3:
+    bucket: ""
+    endpoint: ""
+    region: us-east-1
+    prefix: ""
+    credentialsSecret: ""
+    encryption: ""        # "" (off) | AES256 | aws:kms
+    kmsKeyId: ""          # required when encryption=aws:kms
+  # Example:
+  # allowFrom:
+  #   - podSelector:
+  #       matchLabels:
+  #         app.kubernetes.io/name: my-consumer

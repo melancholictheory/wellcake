@@ -1,0 +1,27 @@
+{{ include "valkey-operator.fullname" . }} installed in namespace {{ .Release.Namespace }}.
+
+Mode: {{ if .Values.watchNamespace }}single-namespace (watching {{ .Values.watchNamespace }}){{ else if eq .Values.rbac.scope "namespace" }}namespace-scoped ({{ .Release.Namespace }}){{ else }}cluster-wide{{ end }}.
+
+Check that the controller is running:
+  kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "valkey-operator.fullname" . }}
+
+Create a Valkey cluster:
+  cat <<EOF | kubectl apply -f -
+  apiVersion: cache.wellcake.io/v1alpha1
+  kind: ValkeyCluster
+  metadata:
+    name: example
+    namespace: default
+  spec:
+    topology: Replication
+    profile: Cache
+    replicas: 3
+    resources:
+      requests: { cpu: 100m, memory: 256Mi }
+      limits:   { cpu: 500m, memory: 1Gi }
+  EOF
+
+Status:
+  kubectl get valkeyclusters -A
+
+See also: charts/valkey-cluster — a wrapper chart for deploying a ValkeyCluster CR.

@@ -1,0 +1,122 @@
+{{- if .Values.webhooks.enabled -}}
+{{- $fullName := include "valkey-operator.fullname" . -}}
+{{- $svc := printf "%s-webhook" $fullName -}}
+{{- $certSecret := printf "%s-webhook-certs" $fullName -}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $svc }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "valkey-operator.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "valkey-operator.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: controller-manager
+  ports:
+    - name: webhook
+      port: 443
+      targetPort: {{ .Values.webhooks.port }}
+      protocol: TCP
+{{- if .Values.webhooks.certManager.enabled }}
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ $fullName }}-selfsigned
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "valkey-operator.labels" . | nindent 4 }}
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $fullName }}-webhook
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "valkey-operator.labels" . | nindent 4 }}
+spec:
+  secretName: {{ $certSecret }}
+  duration: {{ .Values.webhooks.certManager.duration }}
+  renewBefore: {{ .Values.webhooks.certManager.renewBefore }}
+  dnsNames:
+    - {{ $svc }}.{{ .Release.Namespace }}.svc
+    - {{ $svc }}.{{ .Release.Namespace }}.svc.cluster.local
+  issuerRef:
+    name: {{ $fullName }}-selfsigned
+    kind: Issuer
+{{- end }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: {{ $fullName }}
+  labels:
+    {{- include "valkey-operator.labels" . | nindent 4 }}
+  {{- if .Values.webhooks.certManager.enabled }}
+  annotations:
+    cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/{{ $fullName }}-webhook
+  {{- end }}
+webhooks:
+  - name: vvalkeycluster-v1beta1.kb.io
+    failurePolicy: {{ .Values.webhooks.failurePolicy }}
+    sideEffects: None
+    admissionReviewVersions: ["v1"]
+    rules:
+      - apiGroups: ["cache.wellcake.io"]
+        apiVersions: ["v1beta1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["valkeyclusters"]
+    clientConfig:
+      service:
+        name: {{ $svc }}
+        namespace: {{ .Release.Namespace }}
+        path: /validate-cache-wellcake-io-v1beta1-valkeycluster
+        port: 443
+  - name: vvalkeyacl-v1beta1.kb.io
+    failurePolicy: {{ .Values.webhooks.failurePolicy }}
+    sideEffects: None
+    admissionReviewVersions: ["v1"]
+    rules:
+      - apiGroups: ["cache.wellcake.io"]
+        apiVersions: ["v1beta1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["valkeyacls"]
+    clientConfig:
+      service:
+        name: {{ $svc }}
+        namespace: {{ .Release.Namespace }}
+        path: /validate-cache-wellcake-io-v1beta1-valkeyacl
+        port: 443
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: {{ $fullName }}
+  labels:
+    {{- include "valkey-operator.labels" . | nindent 4 }}
+  {{- if .Values.webhooks.certManager.enabled }}
+  annotations:
+    cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/{{ $fullName }}-webhook
+  {{- end }}
+webhooks:
+  - name: mvalkeycluster-v1beta1.kb.io
+    failurePolicy: {{ .Values.webhooks.failurePolicy }}
+    sideEffects: None
+    admissionReviewVersions: ["v1"]
+    rules:
+      - apiGroups: ["cache.wellcake.io"]
+        apiVersions: ["v1beta1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["valkeyclusters"]
+    clientConfig:
+      service:
+        name: {{ $svc }}
+        namespace: {{ .Release.Namespace }}
+        path: /mutate-cache-wellcake-io-v1beta1-valkeycluster
+        port: 443
+{{- end }}

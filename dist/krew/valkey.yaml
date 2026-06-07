@@ -1,0 +1,41 @@
+# krew plugin manifest for `kubectl valkey`.
+#
+# This is a TEMPLATE: the `version`, per-platform `uri` and `sha256` fields are
+# placeholders filled in by the release pipeline once the kubectl-valkey
+# archives are published. Do not `kubectl krew install` this file as-is.
+apiVersion: krew.googlecontainertools.github.com/v1alpha2
+kind: Plugin
+metadata:
+  name: valkey
+spec:
+  version: __VERSION__
+  homepage: https://github.com/melancholictheory/wellcake
+  shortDescription: Operate valkey-operator ValkeyClusters
+  description: |
+    kubectl valkey provides operational commands for ValkeyCluster resources
+    managed by the valkey-operator.
+
+      kubectl valkey status <cluster>   # topology, primary/shards, health, lag, conditions
+  caveats: |
+    Requires the valkey-operator CRDs (cache.wellcake.io) installed in the cluster.
+  platforms:
+    - selector:
+        matchLabels: { os: linux, arch: amd64 }
+      uri: https://github.com/melancholictheory/wellcake/releases/download/__VERSION__/kubectl-valkey_linux_amd64.tar.gz
+      sha256: __SHA256_LINUX_AMD64__
+      bin: kubectl-valkey
+    - selector:
+        matchLabels: { os: linux, arch: arm64 }
+      uri: https://github.com/melancholictheory/wellcake/releases/download/__VERSION__/kubectl-valkey_linux_arm64.tar.gz
+      sha256: __SHA256_LINUX_ARM64__
+      bin: kubectl-valkey
+    - selector:
+        matchLabels: { os: darwin, arch: amd64 }
+      uri: https://github.com/melancholictheory/wellcake/releases/download/__VERSION__/kubectl-valkey_darwin_amd64.tar.gz
+      sha256: __SHA256_DARWIN_AMD64__
+      bin: kubectl-valkey
+    - selector:
+        matchLabels: { os: darwin, arch: arm64 }
+      uri: https://github.com/melancholictheory/wellcake/releases/download/__VERSION__/kubectl-valkey_darwin_arm64.tar.gz
+      sha256: __SHA256_DARWIN_ARM64__
+      bin: kubectl-valkey

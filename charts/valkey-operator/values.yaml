@@ -1,0 +1,128 @@
+## valkey-operator Helm values
+
+# Override the full release name.
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  repository: ghcr.io/melancholictheory/wellcake
+  tag: ""           # defaults to .Chart.AppVersion
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+# Number of operator replicas. Leader-election is on, so >1 is safe.
+replicaCount: 1
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+# RBAC scope.
+#  cluster — ClusterRole + ClusterRoleBinding (watch all namespaces)
+#  namespace — Role + RoleBinding (watch own namespace only)
+rbac:
+  create: true
+  scope: cluster
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# CRDs are shipped in crds/ (Helm installs them on first install but does NOT
+# upgrade them on `helm upgrade`). To skip CRD installation pass `--skip-crds`
+# or manage them out of band (recommended for GitOps).
+#
+# Leader election for HA installs.
+leaderElection:
+  enabled: true
+
+# Max ValkeyClusters reconciled in parallel (different objects only — the same
+# object is never reconciled concurrently). Default 1 serialises the whole fleet;
+# raise it for large installations. Design-review Q3/SC2 suggests ~5 for 500+ CRs.
+maxConcurrentReconciles: 1
+
+# Metrics endpoint (Prometheus).
+metrics:
+  enabled: true
+  port: 8443
+  service:
+    type: ClusterIP
+    annotations: {}
+  serviceMonitor:
+    enabled: false
+    additionalLabels: {}
+    interval: 30s
+  # PrometheusRule with baseline operator alerts (Prometheus Operator CRD).
+  prometheusRule:
+    enabled: false
+    additionalLabels: {}
+    # Durations the alerts must hold before firing.
+    shardsUnhealthyFor: 5m
+    reconcileErrorsFor: 10m
+    # Data-plane alerts (redis_exporter metrics via each cluster's ServiceMonitor).
+    instanceDownFor: 2m
+    replicaLinkDownFor: 1m
+    clusterStateNotOkFor: 1m
+    memoryHighRatio: "0.9"
+    memoryHighFor: 5m
+    fragmentationRatio: "1.5"
+    fragmentationFor: 15m
+    bgsaveFailingFor: 5m
+    fullResyncPerHour: 3
+
+# Health probes.
+probes:
+  port: 8081
+
+# Validating admission webhooks. The operator already covers everything
+# declarative via CEL XValidation; webhooks add cross-resource checks
+# (Secret existence, ValkeyACL clusterRef resolution) that CEL cannot
+# express.
+#
+# Disabled by default because the webhook serving path needs TLS certs,
+# which usually means a cert-manager dependency. Set webhooks.enabled=true
+# AND ensure cert-manager is installed (webhooks.certManager.enabled=true)
+# OR pre-provision the serving Secret yourself and set the caBundle on the
+# ValidatingWebhookConfiguration manually.
+webhooks:
+  enabled: false
+  port: 9443
+  failurePolicy: Fail   # Fail | Ignore
+  certManager:
+    enabled: true       # creates a self-signed Issuer + Certificate
+    duration: 8760h
+    renewBefore: 720h
+
+# Pod-level settings.
+podAnnotations: {}
+podLabels: {}
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []
+
+# Extra args for the manager binary.
+extraArgs: []
+# Extra environment variables.
+extraEnv: []
+
+# Watch only a specific namespace (single-namespace mode).
+# When set, RBAC is restricted to that namespace regardless of rbac.scope.
+watchNamespace: ""

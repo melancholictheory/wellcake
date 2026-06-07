@@ -1,0 +1,19 @@
+ValkeyCluster "{{ include "valkey-cluster.fullname" . }}" created in {{ .Release.Namespace }}.
+
+Topology: {{ .Values.topology }}  Profile: {{ .Values.profile }}  Replicas: {{ .Values.replicas }}
+
+Watch reconciliation:
+  kubectl -n {{ .Release.Namespace }} get valkeycluster {{ include "valkey-cluster.fullname" . }} -w
+
+View status:
+  kubectl -n {{ .Release.Namespace }} describe valkeycluster {{ include "valkey-cluster.fullname" . }}
+
+Get the password:
+  {{- if .Values.auth.existingSecret }}
+  kubectl -n {{ .Release.Namespace }} get secret {{ .Values.auth.existingSecret }} -o jsonpath='{.data.password}' | base64 -d
+  {{- else }}
+  kubectl -n {{ .Release.Namespace }} get secret {{ include "valkey-cluster.fullname" . }}-auth -o jsonpath='{.data.password}' | base64 -d
+  {{- end }}
+
+Connect from inside the cluster:
+  redis-cli -h {{ include "valkey-cluster.fullname" . }}.{{ .Release.Namespace }}.svc -p {{ if .Values.tls.enabled }}6380 --tls{{ else }}6379{{ end }} -a "<password>"

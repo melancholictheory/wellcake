@@ -1,0 +1,16 @@
+apiVersion: v2
+name: valkey-cluster
+description: Wrapper chart for deploying a single ValkeyCluster custom resource
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - valkey
+  - redis
+  - cache
+home: https://github.com/melancholictheory/wellcake
+sources:
+  - https://github.com/melancholictheory/wellcake
+maintainers:
+  - name: The Wellcake Authors
+    url: https://github.com/melancholictheory/wellcake
