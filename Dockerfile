@@ -1,6 +1,10 @@
 # Build the manager binary.
+# Run the build stage natively on the build host (BUILDPLATFORM) and
+# cross-compile to the target platform via GOOS/GOARCH. The build is
+# CGO_ENABLED=0, so this avoids running the Go toolchain under QEMU emulation
+# for a non-native target arch (e.g. arm64 on an amd64 runner) — much faster.
 ARG GOLANG_IMAGE=golang:1.25
-FROM ${GOLANG_IMAGE} AS builder
+FROM --platform=${BUILDPLATFORM} ${GOLANG_IMAGE} AS builder
 ARG TARGETOS
 ARG TARGETARCH
 
