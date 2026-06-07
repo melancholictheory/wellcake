@@ -6,9 +6,22 @@ updates:
       interval: weekly
     open-pull-requests-limit: 10
     groups:
+      # Kubernetes libraries + controller-runtime/-tools move in lockstep, and a
+      # minor bump usually needs code changes — keep them in their own group so
+      # the bump is reviewed deliberately rather than mixed into a routine PR.
+      kubernetes:
+        patterns:
+          - "k8s.io/*"
+          - "sigs.k8s.io/controller-runtime"
+          - "sigs.k8s.io/controller-tools"
+      # Everything else (minor/patch library updates) in one low-risk PR.
       go-dependencies:
         patterns:
           - "*"
+        exclude-patterns:
+          - "k8s.io/*"
+          - "sigs.k8s.io/controller-runtime"
+          - "sigs.k8s.io/controller-tools"
 
   - package-ecosystem: github-actions
     directory: "/"
