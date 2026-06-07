@@ -22,6 +22,17 @@ updates:
           - "k8s.io/*"
           - "sigs.k8s.io/controller-runtime"
           - "sigs.k8s.io/controller-tools"
+    # Hold minor/major bumps of Kubernetes + controller-runtime: as of k8s v0.36 /
+    # controller-runtime v0.24 these require Go 1.26, which is not the project's
+    # minimum yet. Patch (security) updates are still allowed. Remove these
+    # ignores when the toolchain moves to Go 1.26.
+    ignore:
+      - dependency-name: "k8s.io/*"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
+      - dependency-name: "sigs.k8s.io/controller-runtime"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
+      - dependency-name: "sigs.k8s.io/controller-tools"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: "/"
