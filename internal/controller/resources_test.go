@@ -1112,6 +1112,46 @@ func TestRenderValkeyConfVersionGatedDirectives(t *testing.T) {
 	}
 }
 
+func TestRenderValkeyConfReplicaValidityFactor(t *testing.T) {
+	mk := func(profile cachev1beta1.Profile, topo cachev1beta1.Topology, image string) *cachev1beta1.ValkeyCluster {
+		vc := minimalCR()
+		vc.Spec.Topology = topo
+		vc.Spec.Shards = ptr.To[int32](3)
+		vc.Spec.Profile = profile
+		if image != "" {
+			vc.Spec.Image = image
+		}
+		return vc
+	}
+
+	// Cache is availability-first: disable the replica-validity gate so a stale
+	// replica can still win an election (avoids a stuck shard). Any Valkey
+	// version — old, stable directive, no version gate.
+	for _, img := range []string{"valkey/valkey:8.0", "valkey/valkey:9.1"} {
+		if c := renderValkeyConf(mk(cachev1beta1.ProfileCache, cachev1beta1.TopologyCluster, img), ""); !strings.Contains(c, "cluster-replica-validity-factor 0") {
+			t.Errorf("%s Cache/Cluster must set cluster-replica-validity-factor 0\n%s", img, c)
+		}
+	}
+
+	// Durable keeps the default gate (nothing emitted): promoting an
+	// arbitrarily-stale replica would silently lose acknowledged writes.
+	if c := renderValkeyConf(mk(cachev1beta1.ProfileDurable, cachev1beta1.TopologyCluster, ""), ""); strings.Contains(c, "cluster-replica-validity-factor") {
+		t.Errorf("Durable/Cluster must NOT override the validity gate\n%s", c)
+	}
+
+	// Only Cluster topology gets the directive.
+	if c := renderValkeyConf(mk(cachev1beta1.ProfileCache, cachev1beta1.TopologyReplication, ""), ""); strings.Contains(c, "cluster-replica-validity-factor") {
+		t.Errorf("non-Cluster must not get cluster-replica-validity-factor\n%s", c)
+	}
+
+	// spec.config overrides the operator default (rendered last → wins).
+	over := mk(cachev1beta1.ProfileCache, cachev1beta1.TopologyCluster, "")
+	over.Spec.Config = map[string]string{"cluster-replica-validity-factor": "10"}
+	if c := renderValkeyConf(over, ""); !strings.Contains(c, "cluster-replica-validity-factor 10") {
+		t.Errorf("spec.config must be able to override the validity factor\n%s", c)
+	}
+}
+
 func TestReshardScriptsUseASMFlag(t *testing.T) {
 	mkVC := func(perShard bool) *cachev1beta1.ValkeyCluster {
 		vc := &cachev1beta1.ValkeyCluster{

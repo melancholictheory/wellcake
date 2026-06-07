@@ -15,9 +15,14 @@ operator does not bundle Valkey.
   Probed on k3d. On **9.1+** the operator **uses Atomic Slot Migration**
   for all rebalance/reshard operations (version-gated `asmDetectSnippet`,
   `--cluster-use-atomic-slot-migration`; on <9.1 — classic key-by-key reshard;
-  see [adr/0001](adr/0001-atomic-slot-migration.md)). On 9.x it also renders
-  version-gated resilience directives: `cluster-allow-replica-migration no`,
-  `shutdown-on-sigterm failover` (≥9.0), `tls-auto-reload-interval` (TLS+≥9.1).
+  see [adr/0001](adr/0001-atomic-slot-migration.md)). The operator also renders
+  Cluster resilience directives. Version-agnostic (all versions):
+  `cluster-allow-replica-migration no`, and — for the **Cache** profile only —
+  `cluster-replica-validity-factor 0` (availability-first: a stale replica can
+  still win an election, avoiding a stuck shard; **Durable** keeps Valkey's
+  default gate so it never promotes a replica that would silently lose acked
+  writes). Version-gated: `shutdown-on-sigterm failover` (≥9.0) and
+  `tls-auto-reload-interval` (TLS+≥9.1).
 - **7.x** works (the cluster-specific features of 8/9 are not required), but is legacy.
 
 ## What to check when bumping the Valkey major

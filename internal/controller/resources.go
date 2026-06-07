@@ -382,6 +382,21 @@ func renderValkeyConf(vc *cachev1beta1.ValkeyCluster, password string) string {
 		// on all versions. Confirmed by upstream maintainer (valkey-operator #216).
 		// Overridable via spec.config.
 		fmt.Fprintf(&b, "cluster-allow-replica-migration no\n")
+		// Cache profile is availability-first: disable the replica-validity gate
+		// (factor 0) so a replica will failover regardless of how stale its last
+		// contact with the primary was — the same trade-off as
+		// cluster-require-full-coverage no. The default gate (factor 10) refuses to
+		// promote a replica once (now - last_primary_contact) exceeds
+		// cluster-node-timeout * factor + repl-ping-replica-period, which under a
+		// partition/chaos window can leave NO valid replica and a stuck shard with
+		// no election. Durable keeps the default gate: promoting an arbitrarily
+		// stale replica would silently lose acknowledged writes, violating the
+		// Durable contract. Old, stable directive (accepted on all versions, no
+		// gate). Overridable via spec.config. Confirmed upstream (valkey-operator
+		// #216 / PR #222).
+		if vc.Spec.Profile != cachev1beta1.ProfileDurable {
+			fmt.Fprintf(&b, "cluster-replica-validity-factor 0\n")
+		}
 		// Valkey 9.0+: on SIGTERM a cluster primary does a graceful manual failover
 		// to an up-to-date replica before shutting down — a node-local safety net
 		// for OUT-OF-BAND descheduling (node drain / eviction / preemption /
