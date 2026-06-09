@@ -15,3 +15,41 @@ sources:
 maintainers:
   - name: The Wellcake Authors
     url: https://github.com/melancholictheory/wellcake
+annotations:
+  artifacthub.io/category: database
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/operator: "true"
+  artifacthub.io/operatorCapabilities: Basic Install
+  artifacthub.io/prerelease: "true"
+  artifacthub.io/links: |
+    - name: source
+      url: https://github.com/melancholictheory/wellcake
+    - name: documentation
+      url: https://github.com/melancholictheory/wellcake/tree/main/docs
+  artifacthub.io/crds: |
+    - kind: ValkeyCluster
+      version: v1alpha1
+      name: valkeyclusters.cache.wellcake.io
+      displayName: Valkey Cluster
+      description: A Valkey deployment in Standalone, Replication, Sentinel, or Cluster topology.
+    - kind: ValkeyACL
+      version: v1alpha1
+      name: valkeyacls.cache.wellcake.io
+      displayName: Valkey ACL
+      description: A declarative ACL user managed against a ValkeyCluster.
+  artifacthub.io/crdsExamples: |
+    - apiVersion: cache.wellcake.io/v1alpha1
+      kind: ValkeyCluster
+      metadata:
+        name: vk-sample
+      spec:
+        topology: Replication
+        image: valkey/valkey:8.0
+        replicas: 3
+        storage:
+          size: 5Gi
+          mode: rdb
+        auth:
+          enabled: true
+        metrics:
+          enabled: true

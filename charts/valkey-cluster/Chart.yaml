@@ -14,3 +14,12 @@ sources:
 maintainers:
   - name: The Wellcake Authors
     url: https://github.com/melancholictheory/wellcake
+annotations:
+  artifacthub.io/category: database
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/prerelease: "true"
+  artifacthub.io/links: |
+    - name: source
+      url: https://github.com/melancholictheory/wellcake
+    - name: documentation
+      url: https://github.com/melancholictheory/wellcake/tree/main/docs
