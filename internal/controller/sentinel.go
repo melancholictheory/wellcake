@@ -164,8 +164,9 @@ sentinel announce-hostnames yes
 		// Authenticate to the monitored master as the dedicated least-data-exposure
 		// ACL user (seeded on the data nodes) rather than the default user, and
 		// keep requirepass for client/inter-sentinel auth on the Sentinel port.
+		quotedPassword := valkeyConfigArg(password)
 		conf += fmt.Sprintf("sentinel auth-user %s %s\nsentinel auth-pass %s %s\nrequirepass %s\n",
-			sentinelMasterName, sentinelACLUser, sentinelMasterName, password, password)
+			sentinelMasterName, sentinelACLUser, sentinelMasterName, quotedPassword, quotedPassword)
 	}
 	if tlsEnabled(vc) {
 		conf += fmt.Sprintf(`tls-port %d
