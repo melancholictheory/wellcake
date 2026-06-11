@@ -1318,3 +1318,85 @@ func TestBuildScaleDownJobIsDataSafe(t *testing.T) {
 		t.Errorf("scale-down must refuse del-node while the node still owns slots; script:\n%s", s)
 	}
 }
+
+func assertContainerRestricted(t *testing.T, who string, sc *corev1.SecurityContext) {
+	t.Helper()
+	if sc == nil {
+		t.Errorf("%s: nil container securityContext", who)
+		return
+	}
+	if sc.AllowPrivilegeEscalation == nil || *sc.AllowPrivilegeEscalation {
+		t.Errorf("%s: allowPrivilegeEscalation must be false", who)
+	}
+	if sc.RunAsNonRoot == nil || !*sc.RunAsNonRoot {
+		t.Errorf("%s: runAsNonRoot must be true", who)
+	}
+	if sc.SeccompProfile == nil || sc.SeccompProfile.Type != corev1.SeccompProfileTypeRuntimeDefault {
+		t.Errorf("%s: seccompProfile must be RuntimeDefault", who)
+	}
+	dropsAll := false
+	if sc.Capabilities != nil {
+		for _, c := range sc.Capabilities.Drop {
+			if c == "ALL" {
+				dropsAll = true
+			}
+		}
+	}
+	if !dropsAll {
+		t.Errorf("%s: capabilities must drop ALL", who)
+	}
+}
+
+func assertPodTemplateRestricted(t *testing.T, spec corev1.PodSpec) {
+	t.Helper()
+	ps := spec.SecurityContext
+	if ps == nil {
+		t.Fatal("nil pod securityContext")
+	}
+	if ps.RunAsNonRoot == nil || !*ps.RunAsNonRoot {
+		t.Error("pod runAsNonRoot must be true")
+	}
+	if ps.SeccompProfile == nil || ps.SeccompProfile.Type != corev1.SeccompProfileTypeRuntimeDefault {
+		t.Error("pod seccompProfile must be RuntimeDefault")
+	}
+	if ps.RunAsUser == nil || *ps.RunAsUser != 1000 || ps.FSGroup == nil || *ps.FSGroup != 1000 {
+		t.Error("pod must keep fsGroup/runAsUser 1000")
+	}
+	if len(spec.InitContainers) == 0 || len(spec.Containers) == 0 {
+		t.Fatal("expected init + main containers")
+	}
+	for _, c := range spec.InitContainers {
+		assertContainerRestricted(t, "init/"+c.Name, c.SecurityContext)
+	}
+	for _, c := range spec.Containers {
+		assertContainerRestricted(t, c.Name, c.SecurityContext)
+	}
+}
+
+func TestPodAndContainerSecurityContextRestrictedDefaults(t *testing.T) {
+	// Main StatefulSet, metrics on so the exporter sidecar is covered too.
+	vc := minimalCR()
+	vc.Spec.Metrics = &cachev1beta1.MetricsSpec{Enabled: true}
+	sts := buildStatefulSet(vc, "h", false)
+	if got := len(sts.Spec.Template.Spec.Containers); got < 2 {
+		t.Fatalf("expected valkey + exporter containers, got %d", got)
+	}
+	assertPodTemplateRestricted(t, sts.Spec.Template.Spec)
+
+	// Sentinel StatefulSet.
+	assertPodTemplateRestricted(t, buildSentinelStatefulSet(sentinelCR(), false).Spec.Template.Spec)
+
+	// User-provided contexts replace the defaults verbatim.
+	custom := minimalCR()
+	custom.Spec.PodSecurityContext = &corev1.PodSecurityContext{RunAsUser: ptr.To[int64](2000)}
+	custom.Spec.ContainerSecurityContext = &corev1.SecurityContext{Privileged: ptr.To(true)}
+	cs := buildStatefulSet(custom, "h", false)
+	if ps := cs.Spec.Template.Spec.SecurityContext; ps == nil || ps.RunAsUser == nil || *ps.RunAsUser != 2000 {
+		t.Errorf("user podSecurityContext not honored: %+v", ps)
+	}
+	for _, c := range cs.Spec.Template.Spec.Containers {
+		if c.SecurityContext == nil || c.SecurityContext.Privileged == nil || !*c.SecurityContext.Privileged {
+			t.Errorf("%s: user containerSecurityContext not honored", c.Name)
+		}
+	}
+}

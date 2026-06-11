@@ -711,6 +711,50 @@ func updateStrategyFor(proactive bool) appsv1.StatefulSetUpdateStrategy {
 	return appsv1.StatefulSetUpdateStrategy{Type: appsv1.RollingUpdateStatefulSetStrategyType}
 }
 
+// valkeyRunAsID is the uid/gid the Valkey image runs as; kept as the historical
+// default so existing clusters don't change identity when the restricted-PSA
+// defaults are applied.
+const valkeyRunAsID int64 = 1000
+
+// podSecurityContext returns the pod-level security context for Valkey pods: the
+// user's spec.podSecurityContext if set, else a restricted-PSA-compatible default
+// that preserves the historical fsGroup/runAsUser 1000.
+func podSecurityContext(vc *cachev1beta1.ValkeyCluster) *corev1.PodSecurityContext {
+	if vc.Spec.PodSecurityContext != nil {
+		return vc.Spec.PodSecurityContext
+	}
+	return &corev1.PodSecurityContext{
+		FSGroup:        ptr.To(valkeyRunAsID),
+		RunAsUser:      ptr.To(valkeyRunAsID),
+		RunAsNonRoot:   ptr.To(true),
+		SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
+	}
+}
+
+// containerSecurityContext returns the container-level security context applied to
+// every operator-managed Valkey container: the user's
+// spec.containerSecurityContext if set, else a restricted-PSA-compatible default.
+func containerSecurityContext(vc *cachev1beta1.ValkeyCluster) *corev1.SecurityContext {
+	if vc.Spec.ContainerSecurityContext != nil {
+		return vc.Spec.ContainerSecurityContext
+	}
+	return &corev1.SecurityContext{
+		AllowPrivilegeEscalation: ptr.To(false),
+		RunAsNonRoot:             ptr.To(true),
+		Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
+		SeccompProfile:           &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
+	}
+}
+
+// applyContainerSecurityContext sets sc on every container in the given slices.
+func applyContainerSecurityContext(sc *corev1.SecurityContext, groups ...[]corev1.Container) {
+	for _, g := range groups {
+		for i := range g {
+			g[i].SecurityContext = sc
+		}
+	}
+}
+
 func buildStatefulSet(vc *cachev1beta1.ValkeyCluster, configHash string, proactive bool) *appsv1.StatefulSet {
 	labels := labelsFor(vc)
 	replicas := statefulSetReplicas(vc)
@@ -827,6 +871,7 @@ func buildStatefulSet(vc *cachev1beta1.ValkeyCluster, configHash string, proacti
 	if metricsEnabled(vc) {
 		containers = append(containers, buildExporter(vc))
 	}
+	applyContainerSecurityContext(containerSecurityContext(vc), initContainers, containers)
 
 	volumes := []corev1.Volume{
 		{
@@ -932,10 +977,7 @@ func buildStatefulSet(vc *cachev1beta1.ValkeyCluster, configHash string, proacti
 					Tolerations:               vc.Spec.Tolerations,
 					Affinity:                  affinity,
 					TopologySpreadConstraints: tsc,
-					SecurityContext: &corev1.PodSecurityContext{
-						FSGroup:   ptr.To[int64](1000),
-						RunAsUser: ptr.To[int64](1000),
-					},
+					SecurityContext:           podSecurityContext(vc),
 				},
 			},
 			VolumeClaimTemplates: pvcs,
