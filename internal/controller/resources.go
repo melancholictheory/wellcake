@@ -620,6 +620,7 @@ if [ -n "${VALKEY_PASSWORD:-}" ]; then
 elif [ ! -s %[2]s/users.acl ]; then
   : > %[2]s/users.acl
 fi
+# Unlike valkeyConfigArg, this only escapes for double-quoted config values.
 valkey_config_arg() {
   awk 'BEGIN { printf "\"" } { if (NR > 1) printf "\\n"; gsub(/\\/, "\\\\"); gsub(/"/, "\\\""); printf "%%s", $0 } END { printf "\"\n" }'
 }
