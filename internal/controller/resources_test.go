@@ -1479,3 +1479,53 @@ func TestClusterJobsHaveRestrictedSecurityContext(t *testing.T) {
 		})
 	}
 }
+
+func TestBackupAndRestoreJobsHaveRestrictedSecurityContext(t *testing.T) {
+	bvc := minimalCR()
+	bvc.Spec.Backup = &cachev1beta1.BackupSpec{
+		Enabled:  true,
+		Schedule: "0 0 * * *",
+		S3:       &cachev1beta1.S3Spec{Bucket: "b", Region: "r", CredentialsSecret: "creds"},
+	}
+	backupPod := buildBackupCronJob(bvc, "b").Spec.JobTemplate.Spec.Template.Spec
+
+	shards := int32(3)
+	rvc := minimalCR()
+	rvc.Spec.Topology = cachev1beta1.TopologyCluster
+	rvc.Spec.Shards = &shards
+	rvc.Spec.RestoreFrom = &cachev1beta1.RestoreSpec{
+		SourceKey: "base-stamp-shard-{shard}.rdb",
+		S3:        &cachev1beta1.S3Spec{Bucket: "bkt", Region: "r", CredentialsSecret: "c"},
+	}
+	restorePod := buildRestoreAssemblyJob(rvc, "pw", "r").Spec.Template.Spec
+
+	for name, spec := range map[string]corev1.PodSpec{"backup": backupPod, "restore": restorePod} {
+		t.Run(name, func(t *testing.T) {
+			if spec.SecurityContext == nil || spec.SecurityContext.RunAsNonRoot == nil || !*spec.SecurityContext.RunAsNonRoot {
+				t.Errorf("%s pod must have a restricted pod securityContext", name)
+			}
+			for _, c := range spec.InitContainers {
+				assertContainerRestricted(t, name+"/init/"+c.Name, c.SecurityContext)
+			}
+			for _, c := range spec.Containers {
+				assertContainerRestricted(t, name+"/"+c.Name, c.SecurityContext)
+			}
+		})
+	}
+
+	// The aws-cli containers run non-root, so they need a writable HOME.
+	hasHome := func(c corev1.Container) bool {
+		for _, e := range c.Env {
+			if e.Name == "HOME" && e.Value == "/tmp" {
+				return true
+			}
+		}
+		return false
+	}
+	if !hasHome(backupPod.Containers[0]) {
+		t.Error("backup aws-cli (upload) container must set HOME=/tmp for non-root")
+	}
+	if !hasHome(restorePod.InitContainers[0]) {
+		t.Error("restore aws-cli (fetch-manifest) container must set HOME=/tmp for non-root")
+	}
+}

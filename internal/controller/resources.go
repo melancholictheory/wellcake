@@ -177,8 +177,9 @@ func tlsSecretName(vc *cachev1beta1.ValkeyCluster) string {
 
 // configHashFromData returns a deterministic short hash of a ConfigMap.Data map,
 // used to roll the StatefulSet pods whenever valkey.conf or entrypoint.sh changes.
-// The auth password is intentionally NOT included — it lives in a Secret and is
-// loaded at process start via env/mount; rotating it is handled separately.
+// The rendered valkey.conf carries requirepass, so the auth password DOES affect
+// this hash: a rotated existingSecret re-renders the config and rolls the pods
+// (the auth.existingSecret watch + the init-script ACL re-seed apply the change).
 func configHashFromData(data map[string]string) string {
 	keys := make([]string, 0, len(data))
 	for k := range data {

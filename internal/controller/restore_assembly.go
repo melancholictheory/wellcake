@@ -252,6 +252,9 @@ echo "manifest:"; cat /work/manifest.txt
 		{Name: envAWSAccessKey, ValueFrom: secretRef(rs.S3.CredentialsSecret, envAWSAccessKey)},
 		{Name: envAWSSecretKey, ValueFrom: secretRef(rs.S3.CredentialsSecret, envAWSSecretKey)},
 		{Name: envAWSDefaultRegion, Value: rs.S3.Region},
+		// aws-cli writes its CLI cache under $HOME; running non-root under the
+		// restricted PSA, the default HOME may be unwritable, so point it at tmpfs.
+		{Name: "HOME", Value: "/tmp"},
 	}
 	if rs.S3.Endpoint != "" {
 		awsEnv = append(awsEnv, corev1.EnvVar{Name: envS3EndpointURL, Value: rs.S3.Endpoint})
@@ -281,20 +284,23 @@ echo "manifest:"; cat /work/manifest.txt
 				Spec: corev1.PodSpec{
 					RestartPolicy: corev1.RestartPolicyOnFailure,
 					InitContainers: []corev1.Container{{
-						Name:         "fetch-manifest",
-						Image:        awsImage,
-						Command:      []string{shellCmd, "-c", fetchScript},
-						Env:          awsEnv,
-						VolumeMounts: []corev1.VolumeMount{{Name: workVolumeName, MountPath: "/work"}},
+						Name:            "fetch-manifest",
+						Image:           awsImage,
+						Command:         []string{shellCmd, "-c", fetchScript},
+						Env:             awsEnv,
+						VolumeMounts:    []corev1.VolumeMount{{Name: workVolumeName, MountPath: "/work"}},
+						SecurityContext: containerSecurityContext(vc),
 					}},
 					Containers: []corev1.Container{{
-						Name:         "assemble",
-						Image:        vc.Spec.Image,
-						Command:      []string{shellCmd, "-c", script},
-						Env:          valkeyEnv,
-						VolumeMounts: mounts,
+						Name:            "assemble",
+						Image:           vc.Spec.Image,
+						Command:         []string{shellCmd, "-c", script},
+						Env:             valkeyEnv,
+						VolumeMounts:    mounts,
+						SecurityContext: containerSecurityContext(vc),
 					}},
-					Volumes: volumes,
+					Volumes:         volumes,
+					SecurityContext: podSecurityContext(vc),
 				},
 			},
 		},
