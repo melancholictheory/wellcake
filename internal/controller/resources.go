@@ -155,6 +155,13 @@ func passwordSecretName(vc *cachev1beta1.ValkeyCluster) string {
 	return fmt.Sprintf("%s-auth", vc.Name)
 }
 
+func authSecretName(vc *cachev1beta1.ValkeyCluster) string {
+	if vc.Spec.Auth != nil && vc.Spec.Auth.ExistingSecret != "" {
+		return vc.Spec.Auth.ExistingSecret
+	}
+	return passwordSecretName(vc)
+}
+
 // hibernated reports whether the cluster is requested to be hibernated
 // (scaled to zero while keeping PVCs) via the hibernate annotation.
 func hibernated(vc *cachev1beta1.ValkeyCluster) bool {
@@ -194,6 +201,36 @@ func generatePassword(n int) (string, error) {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(b)[:n], nil
+}
+
+func valkeyConfigArg(value string) string {
+	var b strings.Builder
+	b.WriteByte('"')
+	for i := range len(value) {
+		switch c := value[i]; c {
+		case '\\', '"':
+			b.WriteByte('\\')
+			b.WriteByte(c)
+		case '\a':
+			b.WriteString(`\a`)
+		case '\b':
+			b.WriteString(`\b`)
+		case '\n':
+			b.WriteString(`\n`)
+		case '\r':
+			b.WriteString(`\r`)
+		case '\t':
+			b.WriteString(`\t`)
+		default:
+			if c < 0x20 || c == 0x7f {
+				fmt.Fprintf(&b, `\x%02x`, c)
+				continue
+			}
+			b.WriteByte(c)
+		}
+	}
+	b.WriteByte('"')
+	return b.String()
 }
 
 func buildHeadlessService(vc *cachev1beta1.ValkeyCluster) *corev1.Service {
@@ -345,8 +382,9 @@ func renderValkeyConf(vc *cachev1beta1.ValkeyCluster, password string) string {
 	fmt.Fprintf(&b, "protected-mode no\n")
 	fmt.Fprintf(&b, "dir %s\n", dataMountPath)
 	if password != "" {
-		fmt.Fprintf(&b, "requirepass %s\n", password)
-		fmt.Fprintf(&b, "masterauth %s\n", password)
+		quotedPassword := valkeyConfigArg(password)
+		fmt.Fprintf(&b, "requirepass %s\n", quotedPassword)
+		fmt.Fprintf(&b, "masterauth %s\n", quotedPassword)
 	}
 
 	// Persist ACL state on the data PVC so users survive pod restarts.
@@ -554,20 +592,23 @@ func renderInitScript(vc *cachev1beta1.ValkeyCluster) string {
 	// follow-up that needs e2e failover validation.)
 	sentinelACL := ""
 	if vc.Spec.Topology == cachev1beta1.TopologySentinel {
-		sentinelACL = fmt.Sprintf("    echo \"user %s on >$PW &* +@all\" >> %s/users.acl\n",
+		sentinelACL = fmt.Sprintf("    echo \"user %s on #$PW_HASH &* +@all\" >> %s/users.acl\n",
 			sentinelACLUser, dataMountPath)
 	}
 	common := fmt.Sprintf(`set -eu
 cp %[1]s/valkey.conf %[2]s/runtime.conf
 if [ ! -s %[2]s/users.acl ]; then
-  PW=$(sed -n 's/^requirepass //p' %[2]s/runtime.conf | head -n1)
-  if [ -n "$PW" ]; then
-    echo "user default on >$PW ~* &* +@all" > %[2]s/users.acl
+  if [ -n "${VALKEY_PASSWORD:-}" ]; then
+    PW_HASH=$(printf '%%s' "$VALKEY_PASSWORD" | sha256sum | awk '{print $1}')
+    echo "user default on #$PW_HASH ~* &* +@all" > %[2]s/users.acl
 %[3]s  else
     : > %[2]s/users.acl
   fi
 fi
-`, configMountPath, dataMountPath, sentinelACL)
+valkey_config_arg() {
+  awk 'BEGIN { printf "\"" } { if (NR > 1) printf "\\n"; gsub(/\\/, "\\\\"); gsub(/"/, "\\\""); printf "%%s", $0 } END { printf "\"\n" }'
+}
+	`, configMountPath, dataMountPath, sentinelACL)
 
 	// Multi-region: every pod (including pod-0) replicates from an external
 	// primary. Local primary/replica entrypoint logic is bypassed.
@@ -594,7 +635,8 @@ fi
 		}
 		return common + fmt.Sprintf(`echo "replicaof %[1]s %[2]d" >> %[3]s/runtime.conf
 if [ -n "${SOURCE_PASSWORD:-}" ]; then
-  echo "masterauth ${SOURCE_PASSWORD}" >> %[3]s/runtime.conf
+  SOURCE_PASSWORD_ARG=$(printf '%%s' "$SOURCE_PASSWORD" | valkey_config_arg)
+  echo "masterauth ${SOURCE_PASSWORD_ARG}" >> %[3]s/runtime.conf
 fi
 %[4]s%[5]s`, vc.Spec.ReplicateFrom.Host, extPort, dataMountPath, tlsLine, caMergeLine)
 	}
@@ -707,6 +749,13 @@ func buildStatefulSet(vc *cachev1beta1.ValkeyCluster, configHash string, proacti
 			},
 		})
 	}
+	configInitEnv := append([]corev1.EnvVar(nil), envVars...)
+	if vc.Spec.Auth != nil && vc.Spec.Auth.Enabled {
+		configInitEnv = append(configInitEnv, corev1.EnvVar{
+			Name:      envValkeyPassword,
+			ValueFrom: secretRef(authSecretName(vc), secretKeyPassword),
+		})
+	}
 
 	containerPorts := []corev1.ContainerPort{{
 		Name:          appValkey,
@@ -748,7 +797,7 @@ func buildStatefulSet(vc *cachev1beta1.ValkeyCluster, configHash string, proacti
 		Image:           vc.Spec.Image,
 		ImagePullPolicy: vc.Spec.ImagePullPolicy,
 		Command:         []string{shellCmd, "-c", renderInitScript(vc)},
-		Env:             envVars,
+		Env:             configInitEnv,
 		VolumeMounts:    configInitMounts,
 	})
 

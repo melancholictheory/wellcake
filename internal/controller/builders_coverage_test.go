@@ -96,7 +96,7 @@ func TestRenderValkeyConfProfiles(t *testing.T) {
 
 	// Password → requirepass + masterauth.
 	withPass := renderValkeyConf(withMem(cachev1beta1.ProfileCache, "1Gi"), "s3cr3t")
-	if !strings.Contains(withPass, "requirepass s3cr3t") || !strings.Contains(withPass, "masterauth s3cr3t") {
+	if !strings.Contains(withPass, `requirepass "s3cr3t"`) || !strings.Contains(withPass, `masterauth "s3cr3t"`) {
 		t.Errorf("password conf must set requirepass + masterauth\n%s", withPass)
 	}
 
@@ -140,11 +140,14 @@ func TestRenderSentinelConf(t *testing.T) {
 	}
 
 	// Password → sentinel auth-user (dedicated ACL user) + auth-pass + requirepass.
-	if c := renderSentinelConf(sentinelCR(), "pw"); !strings.Contains(c, "auth-pass mymaster pw") || !strings.Contains(c, "requirepass pw") {
+	if c := renderSentinelConf(sentinelCR(), "pw"); !strings.Contains(c, `auth-pass mymaster "pw"`) || !strings.Contains(c, `requirepass "pw"`) {
 		t.Errorf("sentinel auth not rendered\n%s", c)
 	}
 	if c := renderSentinelConf(sentinelCR(), "pw"); !strings.Contains(c, "auth-user mymaster sentinel-user") {
 		t.Errorf("sentinel must authenticate to master as the dedicated ACL user\n%s", c)
+	}
+	if c := renderSentinelConf(sentinelCR(), `abc"def`); !strings.Contains(c, `auth-pass mymaster "abc\"def"`) || !strings.Contains(c, `requirepass "abc\"def"`) {
+		t.Errorf("sentinel auth password must be escaped\n%s", c)
 	}
 
 	// TLS → tls-port + plaintext disabled + tls-replication.

@@ -232,6 +232,27 @@ func TestConfigHashFromDataIsDeterministicAndSensitive(t *testing.T) {
 	}
 }
 
+func TestValkeyConfigArgQuotesSpecialCharacters(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{name: "plain", value: "secret", want: `"secret"`},
+		{name: "double quote", value: `abc"def`, want: `"abc\"def"`},
+		{name: "space backslash hash", value: `a b\c#d`, want: `"a b\\c#d"`},
+		{name: "leading hash", value: `#comment`, want: `"#comment"`},
+		{name: "newline", value: "line\nnext", want: `"line\nnext"`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := valkeyConfigArg(tc.value); got != tc.want {
+				t.Errorf("valkeyConfigArg(%q) = %q, want %q", tc.value, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestRenderValkeyConfHasProfileDefaults(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -275,13 +296,16 @@ func TestRenderInitScriptSeedsDefaultUserACL(t *testing.T) {
 
 	for _, want := range []string{
 		"users.acl",
-		"requirepass",                              // password is read back from runtime.conf
-		"user default on >$PW ~* &* +@all",         // seeded default user carries the password
+		`printf '%s' "$VALKEY_PASSWORD"`,           // hash is computed from the exact Secret value
+		"user default on #$PW_HASH ~* &* +@all",    // seeded default user carries the password hash
 		"[ ! -s " + dataMountPath + "/users.acl ]", // only seed when empty (don't clobber ACL SAVE)
 	} {
 		if !strings.Contains(script, want) {
 			t.Errorf("init script missing %q\n%s", want, script)
 		}
+	}
+	if strings.Contains(script, "sed -n 's/^requirepass //p'") {
+		t.Errorf("init script must not parse the escaped config password back out of runtime.conf\n%s", script)
 	}
 	// It must NOT blindly create an empty file in the auth case.
 	if strings.Contains(script, "touch "+dataMountPath+"/users.acl") {
@@ -303,11 +327,11 @@ func TestRenderInitScriptSeedsSentinelACLUser(t *testing.T) {
 	vc.Spec.Auth = &cachev1beta1.AuthSpec{Enabled: true}
 	script := renderInitScript(vc)
 
-	if !strings.Contains(script, "user sentinel-user on >$PW &* +@all") {
+	if !strings.Contains(script, "user sentinel-user on #$PW_HASH &* +@all") {
 		t.Errorf("Sentinel init script must seed the sentinel ACL user\n%s", script)
 	}
 	// No key glob (~) for the sentinel user — it must not read/write data.
-	if strings.Contains(script, "user sentinel-user on >$PW ~* &* +@all") {
+	if strings.Contains(script, "user sentinel-user on #$PW_HASH ~* &* +@all") {
 		t.Errorf("sentinel-user must not have key access (~*)\n%s", script)
 	}
 }
@@ -332,6 +356,24 @@ func TestRenderValkeyConfMutualTLS(t *testing.T) {
 	vc.Spec.TLS.MutualTLS = true
 	if got := renderValkeyConf(vc, ""); !strings.Contains(got, "tls-auth-clients yes") {
 		t.Errorf("MutualTLS=true must enforce client auth (tls-auth-clients yes)\n%s", got)
+	}
+}
+
+func TestRenderValkeyConfEscapesPasswordArguments(t *testing.T) {
+	vc := minimalCR()
+	password := `abc" def\#ghi`
+	conf := renderValkeyConf(vc, password)
+	quoted := valkeyConfigArg(password)
+	for _, want := range []string{
+		"requirepass " + quoted,
+		"masterauth " + quoted,
+	} {
+		if !strings.Contains(conf, want) {
+			t.Errorf("missing escaped password directive %q\n%s", want, conf)
+		}
+	}
+	if strings.Contains(conf, `requirepass abc"`) {
+		t.Errorf("password must not be rendered as an unquoted config argument\n%s", conf)
 	}
 }
 
@@ -360,8 +402,8 @@ func TestRenderValkeyConfClusterDirectives(t *testing.T) {
 		"cluster-config-file " + dataMountPath + "/nodes.conf",
 		"cluster-node-timeout 5000",
 		"cluster-require-full-coverage yes", // Durable requires it
-		"requirepass secret",
-		"masterauth secret",
+		`requirepass "secret"`,
+		`masterauth "secret"`,
 	} {
 		if !strings.Contains(conf, want) {
 			t.Errorf("missing %q\n%s", want, conf)
@@ -461,6 +503,35 @@ func TestBuildExporterAuthSecret(t *testing.T) {
 	ext.Spec.Auth = &cachev1beta1.AuthSpec{Enabled: true, ExistingSecret: "my-auth"}
 	if got := passwordSecretRef(buildExporter(ext)); got != "my-auth" {
 		t.Errorf("exporter password secret = %q, want my-auth (existingSecret)", got)
+	}
+}
+
+func TestBuildStatefulSetConfigInitGetsAuthPasswordEnv(t *testing.T) {
+	passwordSecretRef := func(vc *cachev1beta1.ValkeyCluster) string {
+		sts := buildStatefulSet(vc, "h", false)
+		for _, e := range sts.Spec.Template.Spec.InitContainers[0].Env {
+			if e.Name == envValkeyPassword && e.ValueFrom != nil && e.ValueFrom.SecretKeyRef != nil {
+				return e.ValueFrom.SecretKeyRef.Name
+			}
+		}
+		return ""
+	}
+
+	gen := minimalCR()
+	gen.Spec.Auth = &cachev1beta1.AuthSpec{Enabled: true}
+	if got := passwordSecretRef(gen); got != "test-auth" {
+		t.Errorf("config-init password secret = %q, want generated test-auth", got)
+	}
+
+	ext := minimalCR()
+	ext.Spec.Auth = &cachev1beta1.AuthSpec{Enabled: true, ExistingSecret: "my-auth"}
+	if got := passwordSecretRef(ext); got != "my-auth" {
+		t.Errorf("config-init password secret = %q, want existingSecret my-auth", got)
+	}
+
+	disabled := minimalCR()
+	if got := passwordSecretRef(disabled); got != "" {
+		t.Errorf("config-init should not get VALKEY_PASSWORD when auth is disabled, got secret %q", got)
 	}
 }
 
@@ -630,6 +701,8 @@ func TestSourceCAMergeRendersCombinedBundle(t *testing.T) {
 		"cat " + tlsMountPath + "/ca.crt " + sourceCAMountPath + "/ca.crt > " + dataMountPath + "/ca-bundle.crt",
 		"replicaof src-primary.dc2.svc.cluster.local 6380",
 		"tls-replication yes",
+		"SOURCE_PASSWORD_ARG=$(printf '%s' \"$SOURCE_PASSWORD\" | valkey_config_arg)",
+		"masterauth ${SOURCE_PASSWORD_ARG}",
 	} {
 		if !strings.Contains(script, want) {
 			t.Errorf("init script missing %q\n%s", want, script)
