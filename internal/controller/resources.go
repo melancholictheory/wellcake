@@ -590,25 +590,40 @@ func renderInitScript(vc *cachev1beta1.ValkeyCluster) string {
 	// NO key glob — so it cannot read or write your data, unlike the default
 	// user. (S1 hardening; tightening to the minimal per-command set is a
 	// follow-up that needs e2e failover validation.)
-	sentinelACL := ""
+	sentinelSeed, sentinelReseed := "", ""
 	if vc.Spec.Topology == cachev1beta1.TopologySentinel {
-		sentinelACL = fmt.Sprintf("    echo \"user %s on #$PW_HASH &* +@all\" >> %s/users.acl\n",
+		sentinelSeed = fmt.Sprintf("    echo \"user %s on #$PW_HASH &* +@all\" >> %s/users.acl\n",
+			sentinelACLUser, dataMountPath)
+		sentinelReseed = fmt.Sprintf("    echo \"user %s on #$PW_HASH &* +@all\" >> %s/users.acl.new\n",
 			sentinelACLUser, dataMountPath)
 	}
+	// users.acl seeding. Valkey applies `requirepass` first, then loads the
+	// aclfile, and the aclfile is authoritative — so the operator-managed users
+	// (default, plus the Sentinel user) carry the password as a SHA-256 hash here.
+	// When the password changes (e.g. a rotated auth.existingSecret, which
+	// re-renders requirepass and rolls the pods) the seeded hash no longer matches,
+	// so we rewrite ONLY the operator-managed user lines and preserve any other
+	// users an `ACL SAVE` persisted (the ValkeyACL CRD). The init runs locally in
+	// the pod, so no live authentication (and thus no knowledge of the old
+	// password) is needed.
 	common := fmt.Sprintf(`set -eu
 cp %[1]s/valkey.conf %[2]s/runtime.conf
-if [ ! -s %[2]s/users.acl ]; then
-  if [ -n "${VALKEY_PASSWORD:-}" ]; then
-    PW_HASH=$(printf '%%s' "$VALKEY_PASSWORD" | sha256sum | awk '{print $1}')
+if [ -n "${VALKEY_PASSWORD:-}" ]; then
+  PW_HASH=$(printf '%%s' "$VALKEY_PASSWORD" | sha256sum | awk '{print $1}')
+  if [ ! -s %[2]s/users.acl ]; then
     echo "user default on #$PW_HASH ~* &* +@all" > %[2]s/users.acl
-%[3]s  else
-    : > %[2]s/users.acl
+%[3]s  elif ! grep -q "^user default on #$PW_HASH " %[2]s/users.acl; then
+    grep -vE "^user (default|%[5]s) " %[2]s/users.acl > %[2]s/users.acl.new || true
+    echo "user default on #$PW_HASH ~* &* +@all" >> %[2]s/users.acl.new
+%[4]s    mv %[2]s/users.acl.new %[2]s/users.acl
   fi
+elif [ ! -s %[2]s/users.acl ]; then
+  : > %[2]s/users.acl
 fi
 valkey_config_arg() {
   awk 'BEGIN { printf "\"" } { if (NR > 1) printf "\\n"; gsub(/\\/, "\\\\"); gsub(/"/, "\\\""); printf "%%s", $0 } END { printf "\"\n" }'
 }
-	`, configMountPath, dataMountPath, sentinelACL)
+	`, configMountPath, dataMountPath, sentinelSeed, sentinelReseed, sentinelACLUser)
 
 	// Multi-region: every pod (including pod-0) replicates from an external
 	// primary. Local primary/replica entrypoint logic is bypassed.

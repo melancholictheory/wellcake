@@ -5,6 +5,9 @@ Copyright 2026 The Wellcake Authors.
 package controller
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -1398,5 +1401,52 @@ func TestPodAndContainerSecurityContextRestrictedDefaults(t *testing.T) {
 		if c.SecurityContext == nil || c.SecurityContext.Privileged == nil || !*c.SecurityContext.Privileged {
 			t.Errorf("%s: user containerSecurityContext not honored", c.Name)
 		}
+	}
+}
+
+func TestRenderInitScriptReseedsDefaultUserOnPasswordChange(t *testing.T) {
+	std := minimalCR()
+	std.Spec.Auth = &cachev1beta1.AuthSpec{Enabled: true}
+	s := renderInitScript(std)
+	for _, want := range []string{
+		`grep -q "^user default on #$PW_HASH "`,     // re-seed unless the line already carries the new hash
+		`grep -vE "^user (default|sentinel-user) "`, // preserve other ACL users while replacing operator-managed ones
+		dataMountPath + "/users.acl.new",            // rewrite via a temp file
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("init script missing re-seed-on-change logic %q\n%s", want, s)
+		}
+	}
+	// Sentinel must re-seed its dedicated ACL user too; it also carries the password.
+	sen := renderInitScript(sentinelCR())
+	if !strings.Contains(sen, `echo "user sentinel-user on #$PW_HASH &* +@all" >> `+dataMountPath+"/users.acl.new") {
+		t.Errorf("sentinel init must re-seed the sentinel ACL user on a password change\n%s", sen)
+	}
+}
+
+func TestRenderInitScriptIsValidShell(t *testing.T) {
+	std := minimalCR()
+	std.Spec.Auth = &cachev1beta1.AuthSpec{Enabled: true}
+	cl := minimalCR()
+	cl.Spec.Topology = cachev1beta1.TopologyCluster
+	cl.Spec.Shards = ptr.To[int32](3)
+	mr := minimalCR()
+	mr.Spec.ReplicateFrom = &cachev1beta1.ReplicateFromSpec{Host: "src", Port: 6379}
+	cases := map[string]*cachev1beta1.ValkeyCluster{
+		"standalone":  std,
+		"sentinel":    sentinelCR(),
+		"cluster":     cl,
+		"multiregion": mr,
+	}
+	for name, vc := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := filepath.Join(t.TempDir(), "init.sh")
+			if err := os.WriteFile(f, []byte(renderInitScript(vc)), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if out, err := exec.Command("sh", "-n", f).CombinedOutput(); err != nil {
+				t.Fatalf("generated init script is not valid shell: %v\n%s", err, out)
+			}
+		})
 	}
 }
