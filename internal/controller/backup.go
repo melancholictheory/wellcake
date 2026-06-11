@@ -263,6 +263,9 @@ echo "ok"
 			},
 		},
 		{Name: envAWSDefaultRegion, Value: s3.Region},
+		// aws-cli writes its CLI cache under $HOME; running non-root under the
+		// restricted PSA, the default HOME may be unwritable, so point it at tmpfs.
+		{Name: "HOME", Value: "/tmp"},
 	}
 	if s3.Endpoint != "" {
 		awsEnv = append(awsEnv, corev1.EnvVar{Name: envS3EndpointURL, Value: s3.Endpoint})
@@ -296,11 +299,12 @@ echo "ok"
 						Spec: corev1.PodSpec{
 							RestartPolicy: corev1.RestartPolicyOnFailure,
 							InitContainers: []corev1.Container{{
-								Name:         "dump",
-								Image:        dumpImage,
-								Command:      []string{shellCmd, "-c", dumpScript},
-								Env:          env,
-								VolumeMounts: mounts,
+								Name:            "dump",
+								Image:           dumpImage,
+								Command:         []string{shellCmd, "-c", dumpScript},
+								Env:             env,
+								VolumeMounts:    mounts,
+								SecurityContext: containerSecurityContext(vc),
 							}},
 							Containers: []corev1.Container{{
 								Name:    "upload",
@@ -310,8 +314,10 @@ echo "ok"
 								VolumeMounts: []corev1.VolumeMount{
 									{Name: backupVolumeName, MountPath: "/backup"},
 								},
+								SecurityContext: containerSecurityContext(vc),
 							}},
-							Volumes: volumes,
+							Volumes:         volumes,
+							SecurityContext: podSecurityContext(vc),
 						},
 					},
 				},
