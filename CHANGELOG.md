@@ -4,7 +4,34 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims to
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0]
+
+Hardens auth handling and makes every operator-managed pod compatible with the
+restricted Pod Security Standard.
+
+### Added
+- Pod- and container-level security contexts via new `spec.podSecurityContext`
+  and `spec.containerSecurityContext` fields. When unset, the operator applies
+  restricted-PSA-compatible defaults to every pod it creates — the StatefulSets,
+  the cluster bootstrap/scale/reshard Jobs, and the backup/restore Jobs — so they
+  are admitted in namespaces enforcing the `restricted` policy.
+- The operator watches a user-managed `spec.auth.existingSecret` and rolls the
+  cluster when it changes, so an external password rotation is picked up.
+
+### Changed
+- Auth passwords are escaped when rendered into `valkey.conf`, fixing startup
+  failures for passwords containing characters meaningful to the config/ACL
+  parser (quotes, spaces, `#`, and similar).
+- The default ACL user is seeded by SHA-256 hash and re-seeded when the password
+  changes, so a rotated `existingSecret` takes effect without manually wiping
+  `users.acl`.
+
+## [0.1.1]
+
+### Added
+- Artifact Hub annotations on the operator and cluster Helm charts.
+
+## [0.1.0]
 
 First public release of the operator. Highlights of the initial feature set:
 
@@ -40,4 +67,6 @@ First public release of the operator. Highlights of the initial feature set:
 - CEL XValidation for immutable and conditional fields; config-hash-driven
   rolling restarts; version-gated Valkey 9.x resilience directives.
 
-[Unreleased]: https://github.com/melancholictheory/wellcake
+[0.2.0]: https://github.com/melancholictheory/wellcake/releases/tag/v0.2.0
+[0.1.1]: https://github.com/melancholictheory/wellcake/releases/tag/v0.1.1
+[0.1.0]: https://github.com/melancholictheory/wellcake/releases/tag/v0.1.0
