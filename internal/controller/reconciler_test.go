@@ -589,3 +589,55 @@ func TestReconcileClusterReshardOnAnnotation(t *testing.T) {
 		t.Fatalf("reshard job not created on annotation: %v", err)
 	}
 }
+
+func TestMapSecretToCluster(t *testing.T) {
+	scheme := newTestScheme(t)
+	const ns = "ns"
+	mkVC := func(name string, auth *cachev1beta1.AuthSpec, tls *cachev1beta1.TLSSpec) *cachev1beta1.ValkeyCluster {
+		return &cachev1beta1.ValkeyCluster{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
+			Spec:       cachev1beta1.ValkeyClusterSpec{Auth: auth, TLS: tls},
+		}
+	}
+	authExt := func() *cachev1beta1.AuthSpec {
+		return &cachev1beta1.AuthSpec{Enabled: true, ExistingSecret: "shared-auth"}
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(
+		mkVC("c1", authExt(), nil),                                                       // references shared-auth
+		mkVC("c2", authExt(), nil),                                                       // also references shared-auth
+		mkVC("c3", &cachev1beta1.AuthSpec{Enabled: true}, nil),                           // generated secret, no existingSecret
+		mkVC("c4", nil, &cachev1beta1.TLSSpec{Enabled: true, ExistingSecret: "tls-ext"}), // TLS existingSecret
+	).Build()
+	r := &ValkeyClusterReconciler{Client: c, Scheme: scheme}
+
+	names := func(reqs []ctrl.Request) []string {
+		out := make([]string, 0, len(reqs))
+		for _, req := range reqs {
+			out = append(out, req.Name)
+		}
+		slices.Sort(out)
+		return out
+	}
+	mapped := func(secretName string) []string {
+		s := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: secretName, Namespace: ns}}
+		return names(r.mapSecretToCluster(context.Background(), s))
+	}
+
+	// A user-managed auth.existingSecret update enqueues every cluster referencing it.
+	if got := mapped("shared-auth"); !slices.Equal(got, []string{"c1", "c2"}) {
+		t.Errorf("auth existingSecret shared-auth → %v, want [c1 c2]", got)
+	}
+	// The TLS cert Secret still enqueues its cluster (no regression).
+	if got := mapped("tls-ext"); !slices.Equal(got, []string{"c4"}) {
+		t.Errorf("tls existingSecret tls-ext → %v, want [c4]", got)
+	}
+	// An unreferenced Secret enqueues nothing.
+	if got := mapped("unrelated"); len(got) != 0 {
+		t.Errorf("unreferenced secret → %v, want none", got)
+	}
+	// The operator-managed generated auth Secret for c3 is "c3-auth"; it must NOT be
+	// enqueued through this path — Owns() already covers operator-owned Secrets.
+	if got := mapped("c3-auth"); len(got) != 0 {
+		t.Errorf("generated auth secret c3-auth → %v, want none (handled by Owns)", got)
+	}
+}
