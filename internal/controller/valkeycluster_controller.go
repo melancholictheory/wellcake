@@ -747,29 +747,38 @@ func (r *ValkeyClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		// slow: the pod can be recreated faster than that, and the survivors then
 		// resync from the empty primary (data loss — see cha-02/cha-03 chaos).
 		Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(mapPodToCluster)).
-		// Watch the TLS cert Secret. cert-manager renews it in place (owned by the
-		// Certificate, not the ValkeyCluster, so Owns() misses it); a renewal must
-		// enqueue a reconcile so the operator reloads the cert onto live pods
-		// without a restart.
-		Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(r.mapTLSSecretToCluster)).
+		// Watch user-managed Secrets the operator does not own: the TLS cert Secret
+		// (cert-manager renews it in place, owned by the Certificate, so Owns()
+		// misses it — a renewal reloads the cert onto live pods without a restart)
+		// and an auth.existingSecret (an external password rotation must re-render
+		// the config and roll the pods). Operator-managed Secrets are owned by the
+		// ValkeyCluster and already covered by Owns() above.
+		Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(r.mapSecretToCluster)).
 		Named("valkeycluster").
 		Complete(r)
 }
 
-// mapTLSSecretToCluster routes a Secret event to any ValkeyCluster in the same
-// namespace that uses it as its TLS cert Secret. The cert Secret carries no
-// operator labels (cert-manager owns it), so we match by the resolved TLS secret
-// name; the per-namespace list is cheap under the one-cluster-per-namespace DBaaS
-// layout.
-func (r *ValkeyClusterReconciler) mapTLSSecretToCluster(ctx context.Context, obj client.Object) []reconcile.Request {
+// mapSecretToCluster routes a Secret event to any ValkeyCluster in the same
+// namespace that references it as a user-managed Secret the operator does not
+// own: either the TLS cert Secret (cert-manager owns it) or an
+// auth.existingSecret (the user owns it). These carry no operator owner ref, so
+// Owns() misses them; we match by the resolved name instead. The operator's own
+// generated Secrets ARE owned and covered by Owns(); they use a different name
+// than any existingSecret, so the name match here naturally skips them. The
+// per-namespace list is cheap under the one-cluster-per-namespace layout.
+func (r *ValkeyClusterReconciler) mapSecretToCluster(ctx context.Context, obj client.Object) []reconcile.Request {
 	var list cachev1beta1.ValkeyClusterList
 	if err := r.List(ctx, &list, client.InNamespace(obj.GetNamespace())); err != nil {
 		return nil
 	}
+	name := obj.GetName()
 	var reqs []reconcile.Request
 	for i := range list.Items {
 		vc := &list.Items[i]
-		if tlsEnabled(vc) && tlsSecretName(vc) == obj.GetName() {
+		tlsMatch := tlsEnabled(vc) && tlsSecretName(vc) == name
+		authMatch := vc.Spec.Auth != nil && vc.Spec.Auth.Enabled &&
+			vc.Spec.Auth.ExistingSecret != "" && vc.Spec.Auth.ExistingSecret == name
+		if tlsMatch || authMatch {
 			reqs = append(reqs, reconcile.Request{
 				NamespacedName: types.NamespacedName{Namespace: vc.Namespace, Name: vc.Name},
 			})
