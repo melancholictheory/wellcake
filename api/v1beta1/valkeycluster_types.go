@@ -168,6 +168,19 @@ type ValkeyClusterSpec struct {
 	// +optional
 	TopologySpreadConstraints []corev1.TopologySpreadConstraint `json:"topologySpreadConstraints,omitempty"`
 
+	// PodSecurityContext sets the pod-level security context for Valkey pods.
+	// If nil the operator applies a restricted-PSA-compatible default
+	// (fsGroup/runAsUser 1000, runAsNonRoot, seccompProfile RuntimeDefault).
+	// +optional
+	PodSecurityContext *corev1.PodSecurityContext `json:"podSecurityContext,omitempty"`
+
+	// ContainerSecurityContext is applied to every operator-managed Valkey
+	// container (config-init, valkey, and the metrics exporter). If nil the
+	// operator applies a restricted-PSA-compatible default (allowPrivilegeEscalation
+	// false, capabilities drop ALL, runAsNonRoot, seccompProfile RuntimeDefault).
+	// +optional
+	ContainerSecurityContext *corev1.SecurityContext `json:"containerSecurityContext,omitempty"`
+
 	// PodDisruptionBudget controls voluntary disruptions for the Valkey StatefulSet.
 	// Defaults to MaxUnavailable=1 when nil.
 	// +optional

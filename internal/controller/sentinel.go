@@ -15,7 +15,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -332,6 +331,7 @@ func buildSentinelStatefulSet(vc *cachev1beta1.ValkeyCluster, proactive bool) *a
 							{Name: configVolumeName, MountPath: "/etc/sentinel", ReadOnly: true},
 							{Name: dataVolumeName, MountPath: dataMountPath},
 						},
+						SecurityContext: containerSecurityContext(vc),
 					}},
 					Containers: []corev1.Container{{
 						Name:    componentSentinel,
@@ -343,15 +343,13 @@ func buildSentinelStatefulSet(vc *cachev1beta1.ValkeyCluster, proactive bool) *a
 							ContainerPort: sentinelPort,
 							Protocol:      corev1.ProtocolTCP,
 						}},
-						VolumeMounts:   volumeMounts,
-						ReadinessProbe: tcpProbe(sentinelPort, 5, 5),
-						LivenessProbe:  tcpProbe(sentinelPort, 15, 20),
+						VolumeMounts:    volumeMounts,
+						ReadinessProbe:  tcpProbe(sentinelPort, 5, 5),
+						LivenessProbe:   tcpProbe(sentinelPort, 15, 20),
+						SecurityContext: containerSecurityContext(vc),
 					}},
-					Volumes: volumes,
-					SecurityContext: &corev1.PodSecurityContext{
-						FSGroup:   ptr.To[int64](1000),
-						RunAsUser: ptr.To[int64](1000),
-					},
+					Volumes:                   volumes,
+					SecurityContext:           podSecurityContext(vc),
 					Affinity:                  defaultAntiAffinity(vc),
 					TopologySpreadConstraints: defaultTopologySpread(vc),
 				},
