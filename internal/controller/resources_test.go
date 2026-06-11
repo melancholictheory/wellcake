@@ -1450,3 +1450,32 @@ func TestRenderInitScriptIsValidShell(t *testing.T) {
 		})
 	}
 }
+
+func TestClusterJobsHaveRestrictedSecurityContext(t *testing.T) {
+	vc := minimalCR()
+	vc.Spec.Topology = cachev1beta1.TopologyCluster
+	vc.Spec.Shards = ptr.To[int32](3)
+	vc.Spec.ReplicasPerShard = ptr.To[int32](1)
+	vc.Status.LastAppliedReplicas = 8 // so scale-down has leaving nodes to render
+	jobs := map[string]*batchv1.Job{
+		"bootstrap": buildBootstrapJob(vc, "pw", "b"),
+		"scaleup":   buildScaleUpJob(vc, "pw", "u"),
+		"scaledown": buildScaleDownJob(vc, "pw", "d"),
+		"reshard":   buildReshardJob(vc, "pw", "r"),
+		"pershard":  buildClusterOpJob(vc, "n", "op", "pw", "echo hi"),
+	}
+	for name, j := range jobs {
+		t.Run(name, func(t *testing.T) {
+			spec := j.Spec.Template.Spec
+			if spec.SecurityContext == nil || spec.SecurityContext.RunAsNonRoot == nil || !*spec.SecurityContext.RunAsNonRoot {
+				t.Errorf("%s job pod must have a restricted pod securityContext", name)
+			}
+			if len(spec.Containers) == 0 {
+				t.Fatalf("%s job has no containers", name)
+			}
+			for _, c := range spec.Containers {
+				assertContainerRestricted(t, name+"/"+c.Name, c.SecurityContext)
+			}
+		})
+	}
+}
