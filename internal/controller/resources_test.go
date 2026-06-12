@@ -321,21 +321,31 @@ func TestRenderInitScriptSeedsDefaultUserACL(t *testing.T) {
 }
 
 func TestRenderInitScriptSeedsSentinelACLUser(t *testing.T) {
-	// Sentinel topology with auth seeds a dedicated sentinel-user (all commands,
-	// all channels, NO key glob → no data access) that Sentinel uses to reach
-	// the master via `sentinel auth-user`.
+	// Sentinel topology with auth seeds a dedicated sentinel-user with the
+	// minimal per-command set + all channels, NO key glob → no data access, used
+	// to reach the master via `sentinel auth-user`.
 	vc := minimalCR()
 	vc.Spec.Topology = cachev1beta1.TopologySentinel
 	vc.Spec.Sentinel = &cachev1beta1.SentinelSpec{Replicas: 3}
 	vc.Spec.Auth = &cachev1beta1.AuthSpec{Enabled: true}
 	script := renderInitScript(vc)
 
-	if !strings.Contains(script, "user sentinel-user on #$PW_HASH &* +@all") {
-		t.Errorf("Sentinel init script must seed the sentinel ACL user\n%s", script)
+	if !strings.Contains(script, "user sentinel-user on #$PW_HASH &* "+sentinelACLCommands) {
+		t.Errorf("Sentinel init script must seed the sentinel ACL user with the minimal command set\n%s", script)
+	}
+	// The narrowed user must NOT carry +@all (all commands) any more.
+	if strings.Contains(script, "user sentinel-user on #$PW_HASH &* +@all") {
+		t.Errorf("sentinel-user must use the minimal command set, not +@all\n%s", script)
 	}
 	// No key glob (~) for the sentinel user — it must not read/write data.
-	if strings.Contains(script, "user sentinel-user on #$PW_HASH ~* &* +@all") {
+	if strings.Contains(script, "user sentinel-user on #$PW_HASH ~*") {
 		t.Errorf("sentinel-user must not have key access (~*)\n%s", script)
+	}
+	// Spot-check a couple of essential commands are present.
+	for _, cmd := range []string{"+slaveof", "+info", "+subscribe", "+config|rewrite", "+client|kill"} {
+		if !strings.Contains(script, cmd) {
+			t.Errorf("sentinel-user ACL missing required command %q\n%s", cmd, script)
+		}
 	}
 }
 
@@ -1419,7 +1429,7 @@ func TestRenderInitScriptReseedsDefaultUserOnPasswordChange(t *testing.T) {
 	}
 	// Sentinel must re-seed its dedicated ACL user too; it also carries the password.
 	sen := renderInitScript(sentinelCR())
-	if !strings.Contains(sen, `echo "user sentinel-user on #$PW_HASH &* +@all" >> `+dataMountPath+"/users.acl.new") {
+	if !strings.Contains(sen, `echo "user sentinel-user on #$PW_HASH &* `+sentinelACLCommands+`" >> `+dataMountPath+"/users.acl.new") {
 		t.Errorf("sentinel init must re-seed the sentinel ACL user on a password change\n%s", sen)
 	}
 }

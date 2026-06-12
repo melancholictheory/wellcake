@@ -1,0 +1,16 @@
+{{- if .Values.namespace.create }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Release.Namespace }}
+  labels:
+    {{- include "valkey-cluster.labels" . | nindent 4 }}
+    {{- with .Values.namespace.podSecurityStandard }}
+    pod-security.kubernetes.io/enforce: {{ . }}
+    pod-security.kubernetes.io/warn: {{ . }}
+    pod-security.kubernetes.io/audit: {{ . }}
+    {{- end }}
+    {{- with .Values.namespace.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

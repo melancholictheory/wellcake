@@ -5,6 +5,19 @@
 nameOverride: ""
 fullnameOverride: ""
 
+# Optionally have this chart create the release Namespace and label it with the
+# Pod Security Standards, so the restricted-PSA-compatible Valkey pods are
+# actually enforced. When create=true the chart OWNS the namespace — install
+# WITHOUT `helm --create-namespace`, into a namespace that does not yet exist,
+# otherwise Helm refuses to adopt a namespace it does not manage.
+namespace:
+  create: false
+  # enforce/warn/audit level: restricted | baseline | privileged.
+  # Empty string → create the namespace without Pod Security labels.
+  podSecurityStandard: restricted
+  # Extra labels to merge onto the namespace.
+  labels: {}
+
 # Topology: Standalone | Replication | Sentinel | Cluster
 topology: Replication
 

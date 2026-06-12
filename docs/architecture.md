@@ -110,6 +110,16 @@ The code has two independent strategies:
 In the `Cluster` topology there is no operator-driven failover — native Valkey
 gossip handles it.
 
+Because the Replication strategy is operator-arbitrated (bounded by the reconcile
+interval and the operator's own liveness, with a split-brain window on a network
+partition), the validating webhook **rejects** a `Durable` profile on a
+`Replication` topology at create time (AR1/EC1). For durable data prefer
+`Sentinel` or `Cluster`, which arbitrate failover in the data plane. To create the
+combination anyway — acknowledging the risk — set the annotation
+`valkey.wellcake.io/accept-replication-durability-risk: "true"`. The gate applies
+only on create: an existing cluster keeps working (with a warning) across an
+operator upgrade.
+
 ## Proactive rolling restart (ADR 0004)
 
 Opt-in via the `valkey.wellcake.io/proactive-rollout: "true"` annotation

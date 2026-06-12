@@ -22,6 +22,11 @@ import (
 
 var valkeyclusterlog = logf.Log.WithName("valkeycluster-resource")
 
+// acceptReplicationDurabilityRiskAnnotation lets a user opt into the
+// otherwise-rejected durable+Replication combination (AR1/EC1) by explicitly
+// acknowledging its split-brain / operator-arbitrated-failover risk.
+const acceptReplicationDurabilityRiskAnnotation = "valkey.wellcake.io/accept-replication-durability-risk"
+
 // SetupValkeyClusterWebhookWithManager registers the webhook for ValkeyCluster
 // in the manager. It captures mgr.GetClient() because the validator's main job
 // is reading referenced Secrets — checks CEL XValidation can't do.
@@ -56,12 +61,12 @@ type ValkeyClusterCustomValidator struct {
 
 func (v *ValkeyClusterCustomValidator) ValidateCreate(ctx context.Context, obj *cachev1beta1.ValkeyCluster) (admission.Warnings, error) {
 	valkeyclusterlog.V(1).Info("validate create", "name", obj.GetName())
-	return v.validate(ctx, obj)
+	return v.validate(ctx, obj, true)
 }
 
 func (v *ValkeyClusterCustomValidator) ValidateUpdate(ctx context.Context, _, newObj *cachev1beta1.ValkeyCluster) (admission.Warnings, error) {
 	valkeyclusterlog.V(1).Info("validate update", "name", newObj.GetName())
-	return v.validate(ctx, newObj)
+	return v.validate(ctx, newObj, false)
 }
 
 func (v *ValkeyClusterCustomValidator) ValidateDelete(_ context.Context, _ *cachev1beta1.ValkeyCluster) (admission.Warnings, error) {
@@ -98,7 +103,7 @@ func referencedSecrets(vc *cachev1beta1.ValkeyCluster) map[string]string {
 // hard errors at admission time — the alternative is a CR that admits but
 // never reconciles because the controller can't read its inputs, which is
 // confusing for users.
-func (v *ValkeyClusterCustomValidator) validate(ctx context.Context, vc *cachev1beta1.ValkeyCluster) (admission.Warnings, error) {
+func (v *ValkeyClusterCustomValidator) validate(ctx context.Context, vc *cachev1beta1.ValkeyCluster, isCreate bool) (admission.Warnings, error) {
 	for name, where := range referencedSecrets(vc) {
 		var s corev1.Secret
 		if err := v.Client.Get(ctx, types.NamespacedName{Namespace: vc.Namespace, Name: name}, &s); err != nil {
@@ -146,14 +151,24 @@ func (v *ValkeyClusterCustomValidator) validate(ctx context.Context, vc *cachev1
 	// (≈15s cadence) and only while the operator is alive, with a split-brain
 	// window on a network partition. For durable data prefer Sentinel (or a
 	// Cluster topology), which arbitrates failover in the data plane. An empty
-	// topology defaults to Replication, so warn for that case too.
+	// topology defaults to Replication, so this covers that case too.
+	//
+	// Hard gate on create: the combination is rejected unless the user
+	// explicitly acknowledges the risk via the annotation. On update the warning
+	// is kept but never newly rejected, so an operator upgrade does not strand a
+	// running cluster that predates the gate.
 	if vc.Spec.Profile == cachev1beta1.ProfileDurable &&
 		(vc.Spec.Topology == "" || vc.Spec.Topology == cachev1beta1.TopologyReplication) {
-		warnings = append(warnings,
-			"profile=Durable with topology=Replication uses operator-arbitrated failover "+
-				"(bounded by the reconcile interval and the operator's own liveness, with a "+
-				"split-brain window on network partition). For durable data prefer "+
-				"topology=Sentinel or Cluster, which arbitrate failover in the data plane.")
+		const risk = "profile=Durable with topology=Replication uses operator-arbitrated " +
+			"failover (bounded by the reconcile interval and the operator's own liveness, with " +
+			"a split-brain window on network partition); for durable data prefer topology=Sentinel " +
+			"or Cluster, which arbitrate failover in the data plane"
+		acknowledged := vc.Annotations[acceptReplicationDurabilityRiskAnnotation] == "true"
+		if isCreate && !acknowledged {
+			return warnings, fmt.Errorf("%s. To create it anyway, acknowledge the risk by setting "+
+				"the annotation %s=\"true\"", risk, acceptReplicationDurabilityRiskAnnotation)
+		}
+		warnings = append(warnings, risk+".")
 	}
 
 	return warnings, nil
