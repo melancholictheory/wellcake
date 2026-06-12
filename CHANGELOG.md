@@ -4,6 +4,25 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims to
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- The `valkey-cluster` chart can create the release Namespace and label it with
+  the Pod Security Standards (`namespace.create`, `namespace.podSecurityStandard`),
+  so the restricted-PSA-compatible Valkey pods are actually enforced (S2).
+
+### Changed
+- The validating webhook now **rejects** `profile: Durable` on a `Replication`
+  topology at create time — that combination relies on operator-arbitrated
+  failover, which has a split-brain window on a network partition (AR1/EC1).
+  Acknowledge the risk to proceed by setting the annotation
+  `valkey.wellcake.io/accept-replication-durability-risk: "true"`; for durable
+  data prefer `Sentinel` or `Cluster`. Existing clusters are unaffected on update.
+- The Sentinel ACL user is narrowed from all commands to the minimal Sentinel
+  command set (health/role checks, the `__sentinel__:hello` pub/sub, the failover
+  transaction, `CONFIG REWRITE`, and `CLIENT`/`SCRIPT KILL`); it still carries no
+  key access — least privilege for the user Sentinel authenticates as (S1).
+
 ## [0.2.0]
 
 Hardens auth handling and makes every operator-managed pod compatible with the
@@ -67,6 +86,7 @@ First public release of the operator. Highlights of the initial feature set:
 - CEL XValidation for immutable and conditional fields; config-hash-driven
   rolling restarts; version-gated Valkey 9.x resilience directives.
 
+[Unreleased]: https://github.com/melancholictheory/wellcake/compare/v0.2.0...HEAD
 [0.2.0]: https://github.com/melancholictheory/wellcake/releases/tag/v0.2.0
 [0.1.1]: https://github.com/melancholictheory/wellcake/releases/tag/v0.1.1
 [0.1.0]: https://github.com/melancholictheory/wellcake/releases/tag/v0.1.0

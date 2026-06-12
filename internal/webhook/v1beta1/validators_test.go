@@ -132,18 +132,29 @@ func TestValkeyClusterValidator(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "Durable + Replication -> warn (operator-arbitrated failover)",
+			name: "Durable + Replication on create -> rejected (gate, risk not acknowledged)",
 			mutate: func(vc *cachev1beta1.ValkeyCluster) {
 				vc.Spec.Profile = cachev1beta1.ProfileDurable
 				vc.Spec.Topology = cachev1beta1.TopologyReplication
 			},
-			wantWarns: true,
+			wantErr: true,
 		},
 		{
-			name: "Durable + empty topology (defaults to Replication) -> warn",
+			name: "Durable + empty topology (defaults to Replication) on create -> rejected",
 			mutate: func(vc *cachev1beta1.ValkeyCluster) {
 				vc.Spec.Profile = cachev1beta1.ProfileDurable
 				vc.Spec.Topology = ""
+			},
+			wantErr: true,
+		},
+		{
+			name: "Durable + Replication with risk acknowledged -> warn, no error",
+			mutate: func(vc *cachev1beta1.ValkeyCluster) {
+				vc.Spec.Profile = cachev1beta1.ProfileDurable
+				vc.Spec.Topology = cachev1beta1.TopologyReplication
+				vc.Annotations = map[string]string{
+					acceptReplicationDurabilityRiskAnnotation: "true",
+				}
 			},
 			wantWarns: true,
 		},
@@ -201,6 +212,27 @@ func TestValkeyClusterValidator(t *testing.T) {
 				t.Fatalf("ValidateCreate warnings = %v, wantWarns = %v", warns, tc.wantWarns)
 			}
 		})
+	}
+}
+
+// On update the durable+Replication gate must not newly reject a cluster that
+// predates it — an operator upgrade must never strand a running deployment. The
+// combination still surfaces the split-brain warning.
+func TestValkeyClusterValidatorUpdateDoesNotGateDurableReplication(t *testing.T) {
+	vc := &cachev1beta1.ValkeyCluster{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "c"},
+		Spec: cachev1beta1.ValkeyClusterSpec{
+			Profile:  cachev1beta1.ProfileDurable,
+			Topology: cachev1beta1.TopologyReplication,
+		},
+	}
+	v := &ValkeyClusterCustomValidator{Client: newFakeClient()}
+	warns, err := v.ValidateUpdate(context.Background(), vc, vc)
+	if err != nil {
+		t.Fatalf("ValidateUpdate err = %v, want nil (update must not gate the durable+Replication risk)", err)
+	}
+	if len(warns) == 0 {
+		t.Fatalf("ValidateUpdate warnings = %v, want a split-brain warning", warns)
 	}
 }
 

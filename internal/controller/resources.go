@@ -585,18 +585,16 @@ func renderInitScript(vc *cachev1beta1.ValkeyCluster) string {
 	// default user stays nopass, matching auth-disabled intent. The file must
 	// exist regardless — Valkey refuses to start if aclfile points at nothing.
 	// For Sentinel topology, seed a dedicated least-data-exposure ACL user that
-	// Sentinel uses to reach the master (sentinel auth-user). It gets all
-	// commands and all pub/sub channels (Sentinel needs INFO/REPLICAOF/CONFIG
-	// REWRITE/CLIENT KILL/SCRIPT KILL plus the __sentinel__:hello channel) but
-	// NO key glob — so it cannot read or write your data, unlike the default
-	// user. (S1 hardening; tightening to the minimal per-command set is a
-	// follow-up that needs e2e failover validation.)
+	// Sentinel uses to reach the master (sentinel auth-user). It gets the minimal
+	// per-command set Sentinel needs (sentinelACLCommands) plus all pub/sub
+	// channels (&*, for __sentinel__:hello) but NO key glob — so it cannot read
+	// or write your data, unlike the default user. (S1 hardening.)
 	sentinelSeed, sentinelReseed := "", ""
 	if vc.Spec.Topology == cachev1beta1.TopologySentinel {
-		sentinelSeed = fmt.Sprintf("    echo \"user %s on #$PW_HASH &* +@all\" >> %s/users.acl\n",
-			sentinelACLUser, dataMountPath)
-		sentinelReseed = fmt.Sprintf("    echo \"user %s on #$PW_HASH &* +@all\" >> %s/users.acl.new\n",
-			sentinelACLUser, dataMountPath)
+		sentinelSeed = fmt.Sprintf("    echo \"user %s on #$PW_HASH &* %s\" >> %s/users.acl\n",
+			sentinelACLUser, sentinelACLCommands, dataMountPath)
+		sentinelReseed = fmt.Sprintf("    echo \"user %s on #$PW_HASH &* %s\" >> %s/users.acl.new\n",
+			sentinelACLUser, sentinelACLCommands, dataMountPath)
 	}
 	// users.acl seeding. Valkey applies `requirepass` first, then loads the
 	// aclfile, and the aclfile is authoritative — so the operator-managed users

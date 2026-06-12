@@ -30,6 +30,16 @@ const (
 	// renderInitScript) that Sentinel authenticates as when reaching the
 	// monitored master — least data exposure vs the default user.
 	sentinelACLUser = "sentinel-user"
+	// sentinelACLCommands is the minimal command set this user needs to monitor
+	// and fail over the data nodes — the canonical Redis/Valkey Sentinel ACL
+	// recommendation: health/role checks (ping/info/role), the
+	// __sentinel__:hello pub/sub (subscribe/publish, paired with the &* channel
+	// glob), the failover transaction (multi/exec + slaveof a.k.a. REPLICAOF),
+	// config|rewrite to persist the new topology, and client|kill / script|kill
+	// to interrupt clients and a running script mid-failover. No key glob — the
+	// user can never read or write your data.
+	sentinelACLCommands = "+multi +slaveof +ping +exec +subscribe " +
+		"+config|rewrite +role +publish +info +client|setname +client|kill +script|kill"
 )
 
 // reconcileSentinel brings up Replication primitives plus a separate
