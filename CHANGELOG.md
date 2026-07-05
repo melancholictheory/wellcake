@@ -4,6 +4,23 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims to
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0]
+
+Exploits Valkey 9.1+ features surfaced by a feature-gap review. Every directive
+is version-gated, so older servers are unaffected.
+
+### Added
+- `spec.logging.format` (`json` | `logfmt` | `legacy`) renders `log-format` for
+  structured server logs, gated on Valkey 9.1+ (opt-in; unset keeps the default).
+- `cluster-config-save-behavior best-effort` on memory-backed (Cache) Cluster
+  pods running Valkey 9.1+, so a failed `nodes.conf` save no longer crashes an
+  availability-first pod. Durable/PVC clusters keep the safe `sync` default.
+
+### Changed
+- Cluster pods running Valkey 9.0+ now set an explicit
+  `terminationGracePeriodSeconds` (30s), giving the graceful SIGTERM manual
+  failover a guaranteed time budget instead of relying on the Kubernetes default.
+
 ## [0.3.0]
 
 ### Added
@@ -86,6 +103,7 @@ First public release of the operator. Highlights of the initial feature set:
 - CEL XValidation for immutable and conditional fields; config-hash-driven
   rolling restarts; version-gated Valkey 9.x resilience directives.
 
+[0.4.0]: https://github.com/melancholictheory/wellcake/releases/tag/v0.4.0
 [0.3.0]: https://github.com/melancholictheory/wellcake/releases/tag/v0.3.0
 [0.2.0]: https://github.com/melancholictheory/wellcake/releases/tag/v0.2.0
 [0.1.1]: https://github.com/melancholictheory/wellcake/releases/tag/v0.1.1
