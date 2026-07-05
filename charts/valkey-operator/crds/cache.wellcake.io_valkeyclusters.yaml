@@ -1286,6 +1286,22 @@ spec:
                 default: IfNotPresent
                 description: ImagePullPolicy for the Valkey container.
                 type: string
+              logging:
+                description: Logging configures structured server logging for the
+                  managed Valkey pods.
+                properties:
+                  format:
+                    description: |-
+                      Format selects the Valkey server log format. "json" and "logfmt" are
+                      structured; "legacy" is the traditional free-text format. "json" requires
+                      Valkey 9.1+; the operator version-gates it and will not render the directive
+                      on older images. Empty leaves the Valkey default (legacy).
+                    enum:
+                    - json
+                    - logfmt
+                    - legacy
+                    type: string
+                type: object
               metrics:
                 description: Metrics enables the Prometheus exporter sidecar.
                 properties:
@@ -3830,6 +3846,22 @@ spec:
                 default: IfNotPresent
                 description: ImagePullPolicy for the Valkey container.
                 type: string
+              logging:
+                description: Logging configures structured server logging for the
+                  managed Valkey pods.
+                properties:
+                  format:
+                    description: |-
+                      Format selects the Valkey server log format. "json" and "logfmt" are
+                      structured; "legacy" is the traditional free-text format. "json" requires
+                      Valkey 9.1+; the operator version-gates it and will not render the directive
+                      on older images. Empty leaves the Valkey default (legacy).
+                    enum:
+                    - json
+                    - logfmt
+                    - legacy
+                    type: string
+                type: object
               metrics:
                 description: Metrics enables the Prometheus exporter sidecar.
                 properties:

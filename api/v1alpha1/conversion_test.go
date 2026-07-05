@@ -29,6 +29,7 @@ func TestValkeyClusterConversionRoundTrip(t *testing.T) {
 			ReplicasPerShard: ptr.To[int32](1),
 			PerShardWorkload: ptr.To(true), // must survive round-trip (public composition writes v1alpha1)
 			Auth:             &AuthSpec{Enabled: true, ExistingSecret: "s"},
+			Logging:          &LoggingSpec{Format: "json"}, // guards the v1alpha1/v1beta1 json-tag parity
 		},
 		Status: ValkeyClusterStatus{Phase: "Ready", ReadyReplicas: 6, ClusterInitialized: true},
 	}

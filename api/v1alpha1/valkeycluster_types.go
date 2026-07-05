@@ -224,6 +224,21 @@ type ValkeyClusterSpec struct {
 	// cross-cluster replication semantics.
 	// +optional
 	ReplicateFrom *ReplicateFromSpec `json:"replicateFrom,omitempty"`
+
+	// Logging configures structured server logging for the managed Valkey pods.
+	// +optional
+	Logging *LoggingSpec `json:"logging,omitempty"`
+}
+
+// LoggingSpec configures how the managed Valkey pods emit their server logs.
+type LoggingSpec struct {
+	// Format selects the Valkey server log format. "json" and "logfmt" are
+	// structured; "legacy" is the traditional free-text format. "json" requires
+	// Valkey 9.1+; the operator version-gates it and will not render the directive
+	// on older images. Empty leaves the Valkey default (legacy).
+	// +kubebuilder:validation:Enum=json;logfmt;legacy
+	// +optional
+	Format string `json:"format,omitempty"`
 }
 
 // ReplicateFromSpec points at an external primary to replicate from.

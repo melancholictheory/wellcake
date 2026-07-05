@@ -1198,6 +1198,105 @@ func TestRenderValkeyConfVersionGatedDirectives(t *testing.T) {
 	}
 }
 
+// cluster-config-save-behavior best-effort — only Cluster + memory-backed data
+// dir + Valkey >= 9.1 (older Valkey fatals on the unknown directive). Keeps the
+// safe `sync` default on durable PVCs.
+func TestRenderValkeyConfClusterConfigSaveBehavior(t *testing.T) {
+	mk := func(topo cachev1beta1.Topology, image string, memory bool) *cachev1beta1.ValkeyCluster {
+		vc := minimalCR()
+		vc.Spec.Topology = topo
+		vc.Spec.Shards = ptr.To[int32](3)
+		vc.Spec.Image = image
+		if memory {
+			vc.Spec.Storage = &cachev1beta1.StorageSpec{Medium: "Memory"}
+		}
+		return vc
+	}
+	const want = "cluster-config-save-behavior best-effort"
+	if c := renderValkeyConf(mk(cachev1beta1.TopologyCluster, "valkey/valkey:9.1", true), ""); !strings.Contains(c, want) {
+		t.Errorf("Cluster + memory + 9.1 must set %q\n%s", want, c)
+	}
+	// gate: 8.x fatals on the directive.
+	if c := renderValkeyConf(mk(cachev1beta1.TopologyCluster, "valkey/valkey:8.0", true), ""); strings.Contains(c, want) {
+		t.Errorf("8.0 must NOT set %q (fatal on 8.x)\n%s", want, c)
+	}
+	// durable PVC (no memory storage) keeps the safe sync default.
+	if c := renderValkeyConf(mk(cachev1beta1.TopologyCluster, "valkey/valkey:9.1", false), ""); strings.Contains(c, want) {
+		t.Errorf("PVC-backed Cluster must keep sync (no %q)\n%s", want, c)
+	}
+	// non-Cluster has no cluster-config file at all.
+	if c := renderValkeyConf(mk(cachev1beta1.TopologyReplication, "valkey/valkey:9.1", true), ""); strings.Contains(c, want) {
+		t.Errorf("non-Cluster must not set %q\n%s", want, c)
+	}
+}
+
+// log-format — opt-in via spec.logging.format, gated on Valkey >= 9.1.
+func TestRenderValkeyConfLogFormat(t *testing.T) {
+	mk := func(image, format string) *cachev1beta1.ValkeyCluster {
+		vc := minimalCR()
+		vc.Spec.Image = image
+		if format != "" {
+			vc.Spec.Logging = &cachev1beta1.LoggingSpec{Format: format}
+		}
+		return vc
+	}
+	if c := renderValkeyConf(mk("valkey/valkey:9.1", "json"), ""); !strings.Contains(c, "log-format json") {
+		t.Errorf("9.1 + logging.format=json must set log-format json\n%s", c)
+	}
+	// gate: unsupported value fatals older servers.
+	if c := renderValkeyConf(mk("valkey/valkey:8.0", "json"), ""); strings.Contains(c, "log-format") {
+		t.Errorf("8.0 must NOT set log-format (fatal on 8.x)\n%s", c)
+	}
+	// unset → operator renders nothing (Valkey default).
+	if c := renderValkeyConf(mk("valkey/valkey:9.1", ""), ""); strings.Contains(c, "log-format") {
+		t.Errorf("no logging.format → no log-format directive\n%s", c)
+	}
+}
+
+// clusterShutdownGracePeriod / TerminationGracePeriodSeconds — set for Cluster on
+// Valkey >= 9.0 (graceful SIGTERM failover budget), nil otherwise.
+func TestClusterShutdownGracePeriod(t *testing.T) {
+	mk := func(topo cachev1beta1.Topology, image string) *cachev1beta1.ValkeyCluster {
+		vc := minimalCR()
+		vc.Spec.Topology = topo
+		vc.Spec.Shards = ptr.To[int32](3)
+		vc.Spec.Image = image
+		return vc
+	}
+	cases := []struct {
+		name    string
+		vc      *cachev1beta1.ValkeyCluster
+		wantSet bool
+	}{
+		{"cluster 9.0 set", mk(cachev1beta1.TopologyCluster, "valkey/valkey:9.0"), true},
+		{"cluster 9.1 set", mk(cachev1beta1.TopologyCluster, "valkey/valkey:9.1"), true},
+		{"cluster 8.0 nil (no graceful failover)", mk(cachev1beta1.TopologyCluster, "valkey/valkey:8.0"), false},
+		{"replication 9.1 nil", mk(cachev1beta1.TopologyReplication, "valkey/valkey:9.1"), false},
+		{"standalone 9.1 nil", mk(cachev1beta1.TopologyStandalone, "valkey/valkey:9.1"), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := clusterShutdownGracePeriod(tc.vc)
+			if tc.wantSet {
+				if got == nil || *got != clusterShutdownGraceSeconds {
+					t.Fatalf("want %ds, got %v", clusterShutdownGraceSeconds, got)
+				}
+			} else if got != nil {
+				t.Fatalf("want nil grace period, got %v", *got)
+			}
+			// the value must reach the StatefulSet PodSpec.
+			sts := buildStatefulSet(tc.vc, "", false)
+			ps := sts.Spec.Template.Spec.TerminationGracePeriodSeconds
+			if tc.wantSet && (ps == nil || *ps != clusterShutdownGraceSeconds) {
+				t.Fatalf("PodSpec TerminationGracePeriodSeconds = %v, want %d", ps, clusterShutdownGraceSeconds)
+			}
+			if !tc.wantSet && ps != nil {
+				t.Fatalf("PodSpec TerminationGracePeriodSeconds = %v, want nil", *ps)
+			}
+		})
+	}
+}
+
 func TestRenderValkeyConfReplicaValidityFactor(t *testing.T) {
 	mk := func(profile cachev1beta1.Profile, topo cachev1beta1.Topology, image string) *cachev1beta1.ValkeyCluster {
 		vc := minimalCR()

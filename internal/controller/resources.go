@@ -395,6 +395,14 @@ func renderValkeyConf(vc *cachev1beta1.ValkeyCluster, password string) string {
 	// practice.
 	fmt.Fprintf(&b, "aclfile %s/users.acl\n", dataMountPath)
 
+	// Structured server logging (opt-in via spec.logging.format). `log-format
+	// json` is a Valkey 9.1+ directive and an unsupported value fatals the
+	// server, so gate the whole field on >= 9.1 (the simplest safe choice;
+	// logfmt/legacy are the pre-9.1 defaults anyway). Overridable via spec.config.
+	if vc.Spec.Logging != nil && vc.Spec.Logging.Format != "" && valkeyImageAtLeast(vc.Spec.Image, 9, 1) {
+		fmt.Fprintf(&b, "log-format %s\n", vc.Spec.Logging.Format)
+	}
+
 	// Cluster-mode directives.
 	if vc.Spec.Topology == cachev1beta1.TopologyCluster {
 		fmt.Fprintf(&b, "cluster-enabled yes\n")
@@ -447,6 +455,16 @@ func renderValkeyConf(vc *cachev1beta1.ValkeyCluster, password string) string {
 		// Overridable via spec.config.
 		if valkeyImageAtLeast(vc.Spec.Image, 9, 0) {
 			fmt.Fprintf(&b, "shutdown-on-sigterm failover\n")
+		}
+		// Valkey 9.1+: on a tmpfs/ephemeral data dir the cluster-config file
+		// (nodes.conf) is not durable anyway, and the default `sync` behavior
+		// CRASHES the node when that file's save fails. `best-effort` keeps an
+		// availability-first memory-backed (Cache) pod serving and only logs the
+		// failure — the same trade-off as cluster-require-full-coverage no.
+		// Durable/PVC clusters keep the safe `sync` default. Gate on >= 9.1
+		// (older Valkey fatals on the unknown directive). Overridable via spec.config.
+		if usesMemoryStorage(vc) && valkeyImageAtLeast(vc.Spec.Image, 9, 1) {
+			fmt.Fprintf(&b, "cluster-config-save-behavior best-effort\n")
 		}
 	}
 
@@ -740,6 +758,25 @@ func updateStrategyFor(proactive bool) appsv1.StatefulSetUpdateStrategy {
 // defaults are applied.
 const valkeyRunAsID int64 = 1000
 
+// clusterShutdownGraceSeconds is the pod terminationGracePeriodSeconds for
+// Cluster pods on Valkey 9.0+, where a primary performs a graceful manual
+// failover on SIGTERM (shutdown-on-sigterm failover). It must exceed
+// cluster-manual-failover-timeout (default 5s) plus snapshot/fsync and kubelet
+// overhead so the kubelet does not SIGKILL the pod mid-failover. 30s equals the
+// k8s default (so drain times do not regress) but is now explicit and
+// guaranteed rather than resting on that default coincidence.
+const clusterShutdownGraceSeconds int64 = 30
+
+// clusterShutdownGracePeriod returns the pod terminationGracePeriodSeconds for
+// Cluster pods on Valkey 9.0+ (graceful SIGTERM failover), else nil (k8s
+// default). Shared by the single-STS and per-shard StatefulSets.
+func clusterShutdownGracePeriod(vc *cachev1beta1.ValkeyCluster) *int64 {
+	if vc.Spec.Topology == cachev1beta1.TopologyCluster && valkeyImageAtLeast(vc.Spec.Image, 9, 0) {
+		return ptr.To(clusterShutdownGraceSeconds)
+	}
+	return nil
+}
+
 // podSecurityContext returns the pod-level security context for Valkey pods: the
 // user's spec.podSecurityContext if set, else a restricted-PSA-compatible default
 // that preserves the historical fsGroup/runAsUser 1000.
@@ -994,14 +1031,15 @@ func buildStatefulSet(vc *cachev1beta1.ValkeyCluster, configHash string, proacti
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: labels, Annotations: podAnnotations},
 				Spec: corev1.PodSpec{
-					InitContainers:            initContainers,
-					Containers:                containers,
-					Volumes:                   volumes,
-					NodeSelector:              vc.Spec.NodeSelector,
-					Tolerations:               vc.Spec.Tolerations,
-					Affinity:                  affinity,
-					TopologySpreadConstraints: tsc,
-					SecurityContext:           podSecurityContext(vc),
+					InitContainers:                initContainers,
+					Containers:                    containers,
+					Volumes:                       volumes,
+					NodeSelector:                  vc.Spec.NodeSelector,
+					Tolerations:                   vc.Spec.Tolerations,
+					Affinity:                      affinity,
+					TopologySpreadConstraints:     tsc,
+					SecurityContext:               podSecurityContext(vc),
+					TerminationGracePeriodSeconds: clusterShutdownGracePeriod(vc),
 				},
 			},
 			VolumeClaimTemplates: pvcs,
