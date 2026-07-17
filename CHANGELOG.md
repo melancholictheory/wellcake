@@ -4,6 +4,34 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims to
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0]
+
+Data-plane telemetry and resilience work built on Valkey 9.1+. Every directive is
+version-gated, so older servers are unaffected.
+
+### Added
+- `valkey_operator_tls_cert_expiry_seconds`: seconds until the earliest-expiring
+  served certificate across a cluster's pods (Valkey 9.1+). Valkey does not
+  refuse to start on an expired certificate, so this is what catches a stalled
+  cert-manager renewal that the automatic reload would otherwise hide.
+- `valkey_operator_thread_utilization_ratio`: true 0-1 thread utilization from
+  the Valkey 9.1+ active-time counters. Under I/O threading, process CPU sits
+  near 100% because threads busy-poll, so CPU% misleads rightsizing.
+- `valkey_operator_zone_colocated_groups`: replication groups (per shard for
+  Cluster) whose pods all landed in one availability zone. The operator's zone
+  spread is a soft constraint, so the scheduler can quietly void the HA it
+  implies. Works on any Valkey version; requires the chart's ClusterRole variant,
+  which now grants read access to nodes.
+- `hash-seed` pinned per cluster on Valkey 9.1+, so a primary and its replicas
+  return identical SCAN-family results and cursors survive the failovers and pod
+  replacements the operator drives.
+
+### Changed
+- Durable Cluster primaries on Valkey 9.0+ now also carry the `safe` shutdown
+  token, so descheduling that cannot fail over becomes visible instead of
+  silently dropping a slot owner. Cache keeps `failover` alone, since `safe`
+  would stall a drain on an availability-first profile.
+
 ## [0.4.0]
 
 Exploits Valkey 9.1+ features surfaced by a feature-gap review. Every directive
@@ -103,6 +131,7 @@ First public release of the operator. Highlights of the initial feature set:
 - CEL XValidation for immutable and conditional fields; config-hash-driven
   rolling restarts; version-gated Valkey 9.x resilience directives.
 
+[0.5.0]: https://github.com/melancholictheory/wellcake/releases/tag/v0.5.0
 [0.4.0]: https://github.com/melancholictheory/wellcake/releases/tag/v0.4.0
 [0.3.0]: https://github.com/melancholictheory/wellcake/releases/tag/v0.3.0
 [0.2.0]: https://github.com/melancholictheory/wellcake/releases/tag/v0.2.0
