@@ -4,6 +4,20 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims to
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- The published Helm charts are now signed with cosign, keyless, using the
+  release workflow's own GitHub OIDC identity, so there is no private key to
+  store or rotate. Charts are signed **by digest**, so a signature binds to that
+  exact artifact and cannot be voided by moving a tag. Verify one with:
+
+  ```sh
+  cosign verify ghcr.io/melancholictheory/charts/valkey-operator:<version> \
+    --certificate-identity-regexp '^https://github\.com/melancholictheory/wellcake/\.github/workflows/release\.yml@' \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com
+  ```
+
 ## [0.5.0]
 
 Data-plane telemetry and resilience work built on Valkey 9.1+. Every directive is
