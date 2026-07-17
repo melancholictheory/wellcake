@@ -17,6 +17,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
 
@@ -1227,6 +1228,59 @@ func TestRenderValkeyConfClusterConfigSaveBehavior(t *testing.T) {
 	// non-Cluster has no cluster-config file at all.
 	if c := renderValkeyConf(mk(cachev1beta1.TopologyReplication, "valkey/valkey:9.1", true), ""); strings.Contains(c, want) {
 		t.Errorf("non-Cluster must not set %q\n%s", want, c)
+	}
+}
+
+// hash-seed — pinned per cluster from the CR UID on Valkey >= 9.1, so SCAN
+// results agree across a primary and its replicas and survive pod replacement.
+func TestRenderValkeyConfHashSeed(t *testing.T) {
+	mk := func(image, uid string) *cachev1beta1.ValkeyCluster {
+		vc := minimalCR()
+		vc.Spec.Image = image
+		vc.UID = types.UID(uid)
+		return vc
+	}
+	const uid = "3f2b1c4d-0000-4000-8000-abcdefabcdef"
+	c := renderValkeyConf(mk("valkey/valkey:9.1", uid), "")
+	if !strings.Contains(c, `hash-seed "`+uid+`"`) {
+		t.Errorf("9.1 must pin hash-seed from the CR UID\n%s", c)
+	}
+	// stable across renders: an immutable directive must not drift per pod/restart
+	if c2 := renderValkeyConf(mk("valkey/valkey:9.1", uid), ""); c2 != c {
+		t.Error("hash-seed render must be deterministic for the same CR")
+	}
+	// gate: 8.x fatals on the unknown directive.
+	if c := renderValkeyConf(mk("valkey/valkey:8.0", uid), ""); strings.Contains(c, "hash-seed") {
+		t.Errorf("8.0 must NOT set hash-seed (fatal on 8.x)\n%s", c)
+	}
+	// no UID (bare object) → nothing to derive a stable seed from.
+	if c := renderValkeyConf(mk("valkey/valkey:9.1", ""), ""); strings.Contains(c, "hash-seed") {
+		t.Errorf("empty UID must not render hash-seed\n%s", c)
+	}
+}
+
+// shutdown-on-sigterm: Durable Cluster additionally refuses an unsafe exit
+// (`safe`); Cache stays on `failover` alone (availability-first, must not stall
+// a drain). Both are 9.0+.
+func TestRenderValkeyConfShutdownSafe(t *testing.T) {
+	mk := func(profile cachev1beta1.Profile, image string) *cachev1beta1.ValkeyCluster {
+		vc := minimalCR()
+		vc.Spec.Topology = cachev1beta1.TopologyCluster
+		vc.Spec.Shards = ptr.To[int32](3)
+		vc.Spec.Profile = profile
+		vc.Spec.Image = image
+		return vc
+	}
+	if c := renderValkeyConf(mk(cachev1beta1.ProfileDurable, "valkey/valkey:9.0"), ""); !strings.Contains(c, "shutdown-on-sigterm failover safe") {
+		t.Errorf("Durable Cluster on 9.0 must add the safe token\n%s", c)
+	}
+	cache := renderValkeyConf(mk(cachev1beta1.ProfileCache, "valkey/valkey:9.0"), "")
+	if !strings.Contains(cache, "shutdown-on-sigterm failover\n") || strings.Contains(cache, "failover safe") {
+		t.Errorf("Cache must stay on failover alone (safe would stall a drain)\n%s", cache)
+	}
+	// gate: neither token exists on 8.x.
+	if c := renderValkeyConf(mk(cachev1beta1.ProfileDurable, "valkey/valkey:8.0"), ""); strings.Contains(c, "shutdown-on-sigterm") {
+		t.Errorf("8.0 must NOT set shutdown-on-sigterm\n%s", c)
 	}
 }
 

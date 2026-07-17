@@ -74,7 +74,14 @@ func (c *replClient) close() {
 
 // info parses `INFO replication` into a map.
 func (c *replClient) info(ctx context.Context) (map[string]string, error) {
-	res, err := c.rdb.Info(ctx, "replication").Result()
+	return c.infoSection(ctx, "replication")
+}
+
+// infoSection parses an arbitrary `INFO <section>` into a flat key/value map.
+// Callers that need fields from several sections (telemetry) pass "everything"
+// rather than guessing section names, which have moved between releases.
+func (c *replClient) infoSection(ctx context.Context, section string) (map[string]string, error) {
+	res, err := c.rdb.Info(ctx, section).Result()
 	if err != nil {
 		return nil, err
 	}

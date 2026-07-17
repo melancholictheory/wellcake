@@ -72,6 +72,7 @@ type ValkeyClusterReconciler struct {
 // +kubebuilder:rbac:groups=core,resources=services;configmaps;secrets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=persistentvolumeclaims,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch;delete
+// +kubebuilder:rbac:groups=core,resources=nodes,verbs=get;list;watch
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 // +kubebuilder:rbac:groups=policy,resources=poddisruptionbudgets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
@@ -140,6 +141,15 @@ func (r *ValkeyClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	} else if after > 0 {
 		return ctrl.Result{RequeueAfter: after}, nil
 	}
+
+	// Best-effort data-plane telemetry, for every topology and never fatal to a
+	// reconcile: TLS cert expiry + thread utilization from Valkey 9.1+ INFO (the
+	// collector returns immediately on older images), plus the zone co-location
+	// check, which reads node labels and so needs no particular Valkey version.
+	if pw, err := r.ensurePasswordSecret(ctx, &vc); err == nil {
+		r.collectValkeyTelemetry(ctx, &vc, pw)
+	}
+	r.checkZoneColocation(ctx, &vc)
 
 	switch vc.Spec.Topology {
 	case cachev1beta1.TopologyStandalone, cachev1beta1.TopologyReplication:
@@ -717,6 +727,10 @@ func (r *ValkeyClusterReconciler) handleDeletion(ctx context.Context, vc *cachev
 	// here on the way out.
 	// For Sentinel/Replication: StatefulSet GC is sufficient — replicas can
 	// shut down in any order.
+
+	// Drop this cluster's telemetry samples and metric series so neither leaks
+	// for the rest of the operator's lifetime.
+	forgetTelemetry(vc)
 
 	controllerutil.RemoveFinalizer(vc, finalizerName)
 	if err := r.Update(ctx, vc); err != nil {

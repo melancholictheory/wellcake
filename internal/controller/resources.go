@@ -403,6 +403,18 @@ func renderValkeyConf(vc *cachev1beta1.ValkeyCluster, password string) string {
 		fmt.Fprintf(&b, "log-format %s\n", vc.Spec.Logging.Format)
 	}
 
+	// Valkey 9.1+: pin the hashtable seed so a primary and its replicas return
+	// identical SCAN/HSCAN/SSCAN/ZSCAN results, and the cluster SCAN cursor
+	// fingerprint stays valid across the failovers and pod replacements the
+	// operator itself drives (proactive rollout, scale-down, eviction). The
+	// directive is immutable at runtime, so the seed must be stable for the
+	// cluster's lifetime: derive it from the CR UID, which every pod — and every
+	// replacement pod — shares. Older Valkey fatals on the unknown directive, so
+	// gate on >= 9.1. Overridable via spec.config.
+	if vc.UID != "" && valkeyImageAtLeast(vc.Spec.Image, 9, 1) {
+		fmt.Fprintf(&b, "hash-seed %s\n", valkeyConfigArg(string(vc.UID)))
+	}
+
 	// Cluster-mode directives.
 	if vc.Spec.Topology == cachev1beta1.TopologyCluster {
 		fmt.Fprintf(&b, "cluster-enabled yes\n")
@@ -454,7 +466,22 @@ func renderValkeyConf(vc *cachev1beta1.ValkeyCluster, password string) string {
 		// it). The `failover` value is 9.0+ (8.x fatals on it), so gate.
 		// Overridable via spec.config.
 		if valkeyImageAtLeast(vc.Spec.Image, 9, 0) {
-			fmt.Fprintf(&b, "shutdown-on-sigterm failover\n")
+			// Durable additionally refuses an UNSAFE clean exit (`safe`): a primary
+			// that still owns slots will not shut down quietly, so out-of-band
+			// descheduling that cannot fail over becomes visible instead of silently
+			// dropping a slot owner. `safe` COMPLEMENTS `failover` (it does not
+			// replace it) and only widens the failover window — the kubelet still
+			// SIGKILLs once terminationGracePeriodSeconds expires, so it is
+			// defence-in-depth, not a hard block, and it does not cover hibernate
+			// (scale-to-0 tears every pod down at once). Cache stays on `failover`
+			// alone: it is availability-first and `safe` would stall a drain. Both
+			// values are 9.0+; `safe` is documented for cluster mode only, which is
+			// exactly this block.
+			if vc.Spec.Profile == cachev1beta1.ProfileDurable {
+				fmt.Fprintf(&b, "shutdown-on-sigterm failover safe\n")
+			} else {
+				fmt.Fprintf(&b, "shutdown-on-sigterm failover\n")
+			}
 		}
 		// Valkey 9.1+: on a tmpfs/ephemeral data dir the cluster-config file
 		// (nodes.conf) is not durable anyway, and the default `sync` behavior
