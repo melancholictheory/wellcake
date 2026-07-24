@@ -22,6 +22,19 @@ resources:
     cpu: 500m
     memory: 256Mi
 
+# CustomResourceDefinitions. They ship as chart TEMPLATES rather than in a
+# top-level crds/ directory, because Helm installs crds/ exactly once and
+# ignores it on every upgrade, which leaves existing installs on a stale schema.
+crd:
+  # Install the ValkeyCluster / ValkeyACL CRDs with this chart. Set to false when
+  # they are managed separately (cluster admin, GitOps, or a shared operator).
+  enabled: true
+  # Keep the CRDs when the release is uninstalled. Deleting a CRD deletes every
+  # custom resource of that kind along with it, so without this `helm uninstall`
+  # would take out every ValkeyCluster in scope. Only disable if you genuinely
+  # intend the data plane to go away with the operator.
+  keep: true
+
 # RBAC scope.
 #  cluster — ClusterRole + ClusterRoleBinding (watch all namespaces)
 #  namespace — Role + RoleBinding (watch own namespace only)

@@ -46,7 +46,31 @@ help: ## Display this help.
 .PHONY: manifests
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
 	"$(CONTROLLER_GEN)" rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
-	cp config/crd/bases/*.yaml charts/valkey-operator/crds/
+	$(MAKE) chart-crds
+
+# Sync the generated CRDs into the operator chart as TEMPLATES, not as a
+# top-level crds/ directory. Helm installs crds/ exactly once and silently
+# ignores it on every subsequent upgrade, so a chart that ships CRDs there
+# leaves existing installs on a stale schema (new spec fields simply never
+# arrive). As templates they follow the normal release lifecycle and upgrade.
+#
+# That also puts CRD deletion under Helm's control, which would be catastrophic
+# on uninstall (dropping a CRD deletes every ValkeyCluster with it), so each CRD
+# carries helm.sh/resource-policy: keep unless the user opts out via crd.keep.
+.PHONY: chart-crds
+chart-crds:
+	@mkdir -p charts/valkey-operator/templates/crd
+	@rm -f charts/valkey-operator/templates/crd/*.yaml
+	@for f in config/crd/bases/*.yaml; do \
+		{ echo '{{- if .Values.crd.enabled }}'; \
+		  awk '/^  annotations:/{ \
+		        print; \
+		        print "    {{- if .Values.crd.keep }}"; \
+		        print "    \"helm.sh/resource-policy\": keep"; \
+		        print "    {{- end }}"; \
+		        next } { print }' "$$f"; \
+		  echo '{{- end }}'; } > "charts/valkey-operator/templates/crd/$$(basename "$$f")"; \
+	done
 
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.

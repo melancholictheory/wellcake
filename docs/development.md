@@ -41,7 +41,6 @@ Regenerate after changing CRD types:
 
 ```sh
 make manifests generate
-cp config/crd/bases/cache.wellcake.io_*.yaml charts/valkey-operator/crds/
 ```
 
 ## Common make targets
@@ -88,7 +87,7 @@ kubectl get valkeyclusters -w
 4. Use the field in the builders
    (`internal/controller/resources.go` and neighbors).
 5. Sync the chart's CRDs:
-   `cp config/crd/bases/* charts/valkey-operator/crds/`.
+   `make manifests` (it syncs them via the `chart-crds` target).
 6. `go build ./...` + `go vet ./...`.
 7. Add it to `docs/crd-reference.md`.
 
@@ -117,7 +116,7 @@ Then:
 3. The new controller is wired into `cmd/main.go`
    automatically by kubebuilder.
 4. Add RBAC permissions for external resources if needed.
-5. Sync the CRD into `charts/valkey-operator/crds/`.
+5. Sync the CRD into the chart with `make manifests`.
 6. Document it in `docs/crd-reference.md`.
 
 ## Tests

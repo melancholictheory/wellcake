@@ -41,7 +41,6 @@ from the package directory, and controller-runtime execs etcd via that path.
 make generate    # deepcopy
 make manifests   # CRD + RBAC + webhook manifests (config/)
 # sync regenerated CRDs into the chart:
-cp config/crd/bases/cache.wellcake.io_*.yaml charts/valkey-operator/crds/
 ```
 
 RBAC and webhook config live BOTH in `config/` (kustomize) AND in the Helm chart

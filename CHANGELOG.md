@@ -4,6 +4,33 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims to
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- The operator chart now ships its CRDs as **templates** instead of a top-level
+  `crds/` directory, so `helm upgrade` applies schema changes. Helm installs
+  `crds/` exactly once and silently ignores it afterwards, which left every
+  upgraded install on the schema it was first installed with: fields added since
+  (`spec.logging`, `spec.podSecurityContext`, and others) never reached the
+  cluster. Two new values control this: `crd.enabled` (skip CRD installation
+  when they are managed elsewhere) and `crd.keep` (default `true`, stamping
+  `helm.sh/resource-policy: keep` so `helm uninstall` does not delete the CRDs
+  and, with them, every ValkeyCluster).
+
+  **Upgrading from chart 0.5.1 or earlier requires a one-time adoption step.**
+  The existing CRDs carry no Helm ownership metadata, so the first upgrade fails
+  with `invalid ownership metadata`. Relabel them once (nothing is deleted, so
+  stored resources are untouched), then upgrade normally:
+
+  ```sh
+  for crd in valkeyclusters.cache.wellcake.io valkeyacls.cache.wellcake.io; do
+    kubectl label crd "$crd" app.kubernetes.io/managed-by=Helm --overwrite
+    kubectl annotate crd "$crd" \
+      meta.helm.sh/release-name=<release> \
+      meta.helm.sh/release-namespace=<namespace> --overwrite
+  done
+  ```
+
 ## [0.5.1]
 
 ### Added

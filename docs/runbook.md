@@ -781,11 +781,28 @@ upgraded:
   script. This is a routine one-pod-at-a-time rolling restart, and the PDB
   protects the quorum. Check the `CHANGELOG` for render changes before
   upgrading durable clusters.
-- **CRDs.** The chart places CRDs in `crds/` (Helm does NOT upgrade them
-  automatically!). When the API changes, apply the CRDs separately:
+- **CRDs.** The chart ships CRDs as templates, so `helm upgrade` applies schema
+  changes like any other resource — no separate step. They carry
+  `helm.sh/resource-policy: keep`, so `helm uninstall` leaves them (and every
+  ValkeyCluster) in place; set `crd.keep=false` only if you really want the data
+  plane to go with the operator. Set `crd.enabled=false` when the CRDs are
+  managed outside the chart.
+
+  **Upgrading a release installed with chart <= 0.5.1** (which shipped CRDs in
+  `crds/`): those CRDs carry no Helm ownership metadata, so the first upgrade
+  fails with `invalid ownership metadata`. Adopt them once, then upgrade as
+  usual:
   ```sh
-  kubectl apply -f charts/valkey-operator/crds/
+  for crd in valkeyclusters.cache.wellcake.io valkeyacls.cache.wellcake.io; do
+    kubectl label crd "$crd" app.kubernetes.io/managed-by=Helm --overwrite
+    kubectl annotate crd "$crd" \
+      meta.helm.sh/release-name=<release> \
+      meta.helm.sh/release-namespace=<namespace> --overwrite
+  done
   ```
+  This only relabels existing objects — nothing is deleted, so stored custom
+  resources are untouched.
+
   As of the v1beta1 CRD it became multi-version (v1alpha1 served + v1beta1
   stored); old v1alpha1 objects are read and written transparently
   (strategy `None`, the schemas are still identical — see ROADMAP E1).
@@ -875,12 +892,11 @@ clusters.
 
 ### `helm template` fails after a new chart version
 
-The CRDs in `charts/valkey-operator/crds/` are regenerated when the API
+The CRDs in `charts/valkey-operator/templates/crd/` are regenerated when the API
 changes. If you forked the chart — re-sync them:
 
 ```sh
 make manifests
-cp config/crd/bases/cache.wellcake.io_*.yaml charts/valkey-operator/crds/
 ```
 
 ## Monitoring
