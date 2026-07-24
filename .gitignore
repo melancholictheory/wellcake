@@ -28,3 +28,8 @@ go.work
 
 # Kubeconfig might contain secrets
 *.kubeconfig
+
+# kubebuilder helm/kustomize plugin output (generated, not committed);
+# dist/krew/valkey.yaml is a hand-maintained template and stays tracked.
+dist/chart/
+dist/install.yaml
