@@ -5089,6 +5089,18 @@ spec:
                   prematurely failed over. Cleared once a master is reachable again.
                 format: date-time
                 type: string
+              quorumDownSince:
+                description: |-
+                  QuorumDownSince is when the operator first observed the Cluster topology
+                  stuck in cluster_state:fail with a majority of primaries unreachable —
+                  the state gossip cannot self-heal, because authorizing a replica failover
+                  needs a master quorum that no longer exists. It debounces operator-driven
+                  quorum recovery (CLUSTER FAILOVER TAKEOVER): the operator only intervenes
+                  after the cluster has been stuck for the recovery threshold, giving gossip
+                  time to promote replicas on its own where a quorum still exists. Cleared
+                  once the cluster reports cluster_state:ok again.
+                format: date-time
+                type: string
               readyReplicas:
                 description: ReadyReplicas is the count of ready Valkey pods.
                 format: int32

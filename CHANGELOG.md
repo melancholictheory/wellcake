@@ -6,6 +6,23 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Cluster topology now recovers automatically from the loss of a **majority of
+  primaries** — the disaster gossip cannot fix on its own, because voting a
+  replica in needs a master quorum that no longer exists, so the cluster would
+  otherwise sit in `cluster_state:fail` with unserved slots indefinitely. The
+  operator confirms each dead primary is fenced from two independent
+  perspectives (the k8s API view of pod/node liveness AND a direct data-path
+  check), waits out a debounce so it never races a failover gossip could still
+  perform, then issues `CLUSTER FAILOVER TAKEOVER` on the most up-to-date
+  surviving replica of each shard. The re-created primaries rejoin as replicas
+  via their retained PVCs. Automatic for the Cache profile; opt-in for Durable
+  (via `valkey.wellcake.io/quorum-takeover: "true"`, since a forced takeover can
+  drop acknowledged writes). Surfaced through `status.quorumDownSince` and the
+  `failover_total{reason="cluster-takeover"}` metric. See ADR 0006. Validated
+  live on k3d: majority of primaries fenced, cluster recovered to `ok` with 0
+  data loss and the fenced primaries rejoining as replicas.
+
 ### Changed
 - Replicas now authenticate to their primary as a dedicated, least-privilege ACL
   user (`replicator`, granting only `+psync +replconf +ping` and no key access)

@@ -57,39 +57,23 @@ func (r *ValkeyClusterReconciler) reconcileCluster(ctx context.Context, vc *cach
 		}
 	}
 
-	// Scale-up: if the spec asks for more replicas than the cluster currently
-	// knows about (Status.LastAppliedReplicas), and all desired pods are
-	// already Ready, run a one-shot add-node Job. Slot rebalance is gated
-	// by spec.autoReshard.
-	if vc.Status.ClusterInitialized && allReady && vc.Status.LastAppliedReplicas < want {
-		result, err := r.runClusterScaleUp(ctx, vc, password)
-		if err != nil || !result.IsZero() {
-			return result, err
-		}
+	// Quorum recovery (closes the Cluster-topology SPOF of AR1): a Cluster that
+	// has lost the majority of its primaries is stuck in cluster_state:fail —
+	// gossip cannot vote a failover without a master quorum. The operator detects
+	// it and drives CLUSTER FAILOVER TAKEOVER on surviving replicas after fencing
+	// the dead primaries via the k8s API. Automatic for Cache; opt-in for Durable
+	// (a forced takeover can drop acknowledged writes). This must run even when
+	// not all pods are Ready — an unready majority is exactly the outage it repairs
+	// — so it sits ahead of the allReady-gated scale/reshard/survey steps below.
+	if res, handled, rerr := r.maybeRecoverClusterQuorum(ctx, vc, password); handled {
+		return res, rerr
 	}
 
-	// Scale-down: if the spec wants fewer replicas than the cluster currently
-	// has (Status.LastAppliedReplicas), run the scale-down Job that reshards
-	// slots away from the leaving masters and del-nodes them. The StatefulSet
-	// is held at the old size by statefulSetReplicas() until this Job
-	// succeeds — otherwise pods owning slots would be deleted and lose data.
-	if vc.Status.ClusterInitialized && vc.Status.LastAppliedReplicas > want {
-		result, err := r.runClusterScaleDown(ctx, vc, password)
-		if err != nil || !result.IsZero() {
-			return result, err
-		}
-	}
-
-	// Manual reshard request (valkey.wellcake.io/reshard): run a one-off rebalance
-	// once per distinct token. Only when the cluster is initialized and all
-	// pods are Ready so the rebalance sees a stable membership.
-	if vc.Status.ClusterInitialized && allReady {
-		if tok := vc.Annotations[reshardAnnotation]; tok != "" && tok != vc.Status.LastReshardToken {
-			result, err := r.runClusterReshard(ctx, vc, password, tok)
-			if err != nil || !result.IsZero() {
-				return result, err
-			}
-		}
+	// One-shot membership operations (scale-up add-node, scale-down reshard-away,
+	// manual reshard): each runs a Job and short-circuits the reconcile while in
+	// flight. Extracted to keep this function under the complexity budget.
+	if res, handled, rerr := r.maybeReconcileClusterScaling(ctx, vc, password, want, allReady); handled {
+		return res, rerr
 	}
 
 	// Proactive rolling restart (ADR 0004): when opted in and the cluster is in
@@ -133,6 +117,43 @@ func (r *ValkeyClusterReconciler) maybeDriveClusterRollout(
 	}
 	if rolling {
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, true, nil
+	}
+	return ctrl.Result{}, false, nil
+}
+
+// maybeReconcileClusterScaling advances the one-shot membership operations —
+// scale-up (add-node), scale-down (reshard slots away + del-node) and a manual
+// reshard request — each of which runs a Job and short-circuits the reconcile
+// while in flight. Returns handled=true (with the Job's result) when one is in
+// progress or just started; handled=false when there is nothing to do and normal
+// reconciliation should continue. Scale-up and reshard require a stable, all-Ready
+// membership; scale-down is gated on the replica count alone because
+// statefulSetReplicas() holds the STS at its old size until the reshard completes.
+func (r *ValkeyClusterReconciler) maybeReconcileClusterScaling(
+	ctx context.Context, vc *cachev1beta1.ValkeyCluster, password string, want int32, allReady bool,
+) (ctrl.Result, bool, error) {
+	if !vc.Status.ClusterInitialized {
+		return ctrl.Result{}, false, nil
+	}
+	if allReady && vc.Status.LastAppliedReplicas < want {
+		result, err := r.runClusterScaleUp(ctx, vc, password)
+		if err != nil || !result.IsZero() {
+			return result, true, err
+		}
+	}
+	if vc.Status.LastAppliedReplicas > want {
+		result, err := r.runClusterScaleDown(ctx, vc, password)
+		if err != nil || !result.IsZero() {
+			return result, true, err
+		}
+	}
+	if allReady {
+		if tok := vc.Annotations[reshardAnnotation]; tok != "" && tok != vc.Status.LastReshardToken {
+			result, err := r.runClusterReshard(ctx, vc, password, tok)
+			if err != nil || !result.IsZero() {
+				return result, true, err
+			}
+		}
 	}
 	return ctrl.Result{}, false, nil
 }

@@ -388,6 +388,41 @@ The operator does not intervene. The Sentinel quorum elects a new primary;
 clients learn it via `SENTINEL get-master-addr-by-name`. The operator only
 maintains the StatefulSets, ConfigMaps, and Services.
 
+## Cluster: recovering from a lost primary majority (ADR 0006)
+
+A Cluster fails a single primary over by gossip vote, which needs a **majority of
+masters**. If it loses more than half its primaries at once (an AZ/node-group
+outage, a bad drain), the survivors are not a quorum and gossip **cannot** promote
+the healthy, current replicas of the dead primaries — the cluster stays in
+`cluster_state:fail` with unserved slots indefinitely.
+
+The operator recovers this automatically for the **Cache** profile. It only acts
+once the survivors are provably below a quorum, the cluster has been stuck for a
+45s debounce (so it never races a failover gossip could still do), and each dead
+primary is fenced from both the k8s API (pod/node not serving) and a direct
+data-path check. It then issues `CLUSTER FAILOVER TAKEOVER` on the best surviving
+replica of each shard. The re-created primaries rejoin as replicas via their
+retained PVCs — no manual step.
+
+```sh
+# watch it happen
+kubectl -n <ns> get valkeycluster <cluster> -o jsonpath='{.status.quorumDownSince}'  # set while stuck, cleared on recovery
+kubectl -n valkey-operator-system logs deploy/valkey-operator-controller-manager | grep 'quorum recovery'
+# metric: failover_total{reason="cluster-takeover"}
+```
+
+**Durable profile:** recovery is **off by default**, because a forced takeover can
+promote a slightly-behind replica and drop acknowledged writes — the opposite of
+the Durable contract. A stuck Durable cluster waits for a human. Opt in only when
+you accept that trade-off:
+
+```sh
+kubectl -n <ns> annotate valkeycluster <cluster> valkey.wellcake.io/quorum-takeover=true
+```
+
+A shard that lost **every** pod (primary and all its replicas) is not recovered by
+takeover — there is nothing to promote. Restore it from a backup instead.
+
 ## Cluster per-shard workload (ADR 0005, experimental)
 
 With `spec.perShardWorkload: true`, a Cluster is rendered as **one
