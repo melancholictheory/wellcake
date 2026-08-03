@@ -158,10 +158,20 @@ func (r *ValkeyClusterReconciler) applyPasswordToPods(ctx context.Context, vc *c
 		return nil
 	}
 
+	// Operator-managed non-default users (replication / Sentinel) carry the same
+	// password and must be re-keyed alongside default, or the replica links
+	// (masteruser=replicator) and Sentinel break the moment the old password drops.
+	managed := managedNonDefaultUsers(vc)
+
 	// Pass 1: every node accepts old AND new; replicas adopt the new masterauth.
 	if err := onEachPod("add-new", func(c *replClient) error {
 		if err := c.aclAddDefaultPassword(ctx, newPw); err != nil {
 			return err
+		}
+		for _, u := range managed {
+			if err := c.aclSetManagedUser(ctx, u.name, u.rules, newPw, true); err != nil {
+				return err
+			}
 		}
 		return c.configSet(ctx, "masterauth", newPw)
 	}); err != nil {
@@ -172,6 +182,11 @@ func (r *ValkeyClusterReconciler) applyPasswordToPods(ctx context.Context, vc *c
 	return onEachPod("cutover", func(c *replClient) error {
 		if err := c.aclSetDefaultPassword(ctx, newPw); err != nil {
 			return err
+		}
+		for _, u := range managed {
+			if err := c.aclSetManagedUser(ctx, u.name, u.rules, newPw, false); err != nil {
+				return err
+			}
 		}
 		if err := c.configSet(ctx, "requirepass", newPw); err != nil {
 			return err

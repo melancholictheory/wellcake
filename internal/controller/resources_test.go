@@ -1572,18 +1572,106 @@ func TestRenderInitScriptReseedsDefaultUserOnPasswordChange(t *testing.T) {
 	std.Spec.Auth = &cachev1beta1.AuthSpec{Enabled: true}
 	s := renderInitScript(std)
 	for _, want := range []string{
-		`grep -q "^user default on #$PW_HASH "`,     // re-seed unless the line already carries the new hash
-		`grep -vE "^user (default|sentinel-user) "`, // preserve other ACL users while replacing operator-managed ones
-		dataMountPath + "/users.acl.new",            // rewrite via a temp file
+		`grep -q "^user default on #$PW_HASH "`,                // re-seed unless the line already carries the new hash
+		`grep -vE "^user (default|sentinel-user|replicator) "`, // preserve other ACL users while replacing operator-managed ones
+		dataMountPath + "/users.acl.new",                       // rewrite via a temp file
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("init script missing re-seed-on-change logic %q\n%s", want, s)
 		}
 	}
+	// A replicating topology (minimalCR is Replication) re-seeds the replication
+	// user on a password change too.
+	if !strings.Contains(s, `echo "user replicator on #$PW_HASH `+replicationACLCommands+`" >> `+dataMountPath+"/users.acl.new") {
+		t.Errorf("init must re-seed the replication ACL user on a password change\n%s", s)
+	}
 	// Sentinel must re-seed its dedicated ACL user too; it also carries the password.
 	sen := renderInitScript(sentinelCR())
 	if !strings.Contains(sen, `echo "user sentinel-user on #$PW_HASH &* `+sentinelACLCommands+`" >> `+dataMountPath+"/users.acl.new") {
 		t.Errorf("sentinel init must re-seed the sentinel ACL user on a password change\n%s", sen)
+	}
+}
+
+// The dedicated replication user is seeded and wired as masteruser for every
+// replicating topology (not Standalone), least-privilege vs the default user.
+func TestRenderReplicationUser(t *testing.T) {
+	mk := func(topo cachev1beta1.Topology) *cachev1beta1.ValkeyCluster {
+		vc := minimalCR()
+		vc.Spec.Topology = topo
+		vc.Spec.Auth = &cachev1beta1.AuthSpec{Enabled: true}
+		if topo == cachev1beta1.TopologyCluster {
+			vc.Spec.Shards = ptr.To[int32](3)
+		}
+		if topo == cachev1beta1.TopologySentinel {
+			vc.Spec.Sentinel = &cachev1beta1.SentinelSpec{Replicas: 3}
+		}
+		return vc
+	}
+	seedLine := `echo "user replicator on #$PW_HASH ` + replicationACLCommands + `"`
+
+	for _, topo := range []cachev1beta1.Topology{
+		cachev1beta1.TopologyReplication, cachev1beta1.TopologyCluster, cachev1beta1.TopologySentinel,
+	} {
+		vc := mk(topo)
+		conf := renderValkeyConf(vc, "secret")
+		if !strings.Contains(conf, "masteruser replicator") {
+			t.Errorf("%s: valkey.conf must set masteruser replicator\n%s", topo, conf)
+		}
+		if s := renderInitScript(vc); !strings.Contains(s, seedLine) {
+			t.Errorf("%s: init must seed the replication user\n%s", topo, s)
+		}
+	}
+
+	// Standalone has no replicas: no replication user, no masteruser.
+	std := mk(cachev1beta1.TopologyStandalone)
+	conf := renderValkeyConf(std, "secret")
+	if strings.Contains(conf, "masteruser") {
+		t.Errorf("Standalone must not set masteruser\n%s", conf)
+	}
+	if s := renderInitScript(std); strings.Contains(s, "user replicator") {
+		t.Errorf("Standalone must not seed the replication user\n%s", s)
+	}
+	// The replication user carries NO key glob (no data access).
+	if strings.Contains(seedLine, "~*") {
+		t.Error("replication user must not be granted key access")
+	}
+}
+
+// managedNonDefaultUsers drives which users password rotation re-keys, and
+// isReservedACLUser protects them from the ValkeyACL reconciler.
+func TestManagedNonDefaultUsersAndReserved(t *testing.T) {
+	rep := minimalCR() // Replication
+	if got := managedNonDefaultUsers(rep); len(got) != 1 ||
+		got[0].name != replicationACLUser || got[0].rules != replicationACLCommands {
+		t.Fatalf("Replication managed users = %+v", got)
+	}
+
+	sen := minimalCR()
+	sen.Spec.Topology = cachev1beta1.TopologySentinel
+	rules := map[string]string{}
+	for _, u := range managedNonDefaultUsers(sen) {
+		rules[u.name] = u.rules
+	}
+	if _, ok := rules[replicationACLUser]; !ok {
+		t.Error("Sentinel must still re-key the replication user")
+	}
+	if r := rules[sentinelACLUser]; !strings.HasPrefix(r, "&* ") {
+		t.Errorf("sentinel-user rules must keep the channel glob: %q", r)
+	}
+
+	std := minimalCR()
+	std.Spec.Topology = cachev1beta1.TopologyStandalone
+	if got := managedNonDefaultUsers(std); len(got) != 0 {
+		t.Fatalf("Standalone must have no managed non-default users, got %+v", got)
+	}
+
+	for _, n := range []string{"default", replicationACLUser, sentinelACLUser} {
+		if !isReservedACLUser(n) {
+			t.Errorf("%q must be reserved", n)
+		}
+	}
+	if isReservedACLUser("alice") {
+		t.Error("a user-defined name must not be reserved")
 	}
 }
 

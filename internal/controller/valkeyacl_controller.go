@@ -201,7 +201,7 @@ func (r *ValkeyACLReconciler) applyACLFanout(
 			}
 		}
 		for _, prev := range acl.Status.AppliedUsers {
-			if _, keep := desiredNames[prev]; keep || prev == "default" {
+			if _, keep := desiredNames[prev]; keep || isReservedACLUser(prev) {
 				continue
 			}
 			if err := c.rdb.Do(ctx, "ACL", "DELUSER", prev).Err(); err != nil {

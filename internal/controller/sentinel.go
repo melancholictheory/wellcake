@@ -40,6 +40,16 @@ const (
 	// user can never read or write your data.
 	sentinelACLCommands = "+multi +slaveof +ping +exec +subscribe " +
 		"+config|rewrite +role +publish +info +client|setname +client|kill +script|kill"
+	// replicationACLUser is the dedicated ACL user a REPLICA authenticates as when
+	// it connects to its primary (masteruser/masterauth), instead of the
+	// full-access default user. If the replication credential ever leaks it can do
+	// nothing but replicate: no key access, no arbitrary commands.
+	replicationACLUser = "replicator"
+	// replicationACLCommands is the minimal set a replica needs on its primary:
+	// PSYNC to start/continue the replication stream, REPLCONF for the handshake
+	// and ACKs, and PING for keepalive. The stream itself is not ACL-checked per
+	// key, so no key glob is granted.
+	replicationACLCommands = "+psync +replconf +ping"
 )
 
 // reconcileSentinel brings up Replication primitives plus a separate
