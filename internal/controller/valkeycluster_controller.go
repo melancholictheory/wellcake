@@ -465,6 +465,15 @@ func (r *ValkeyClusterReconciler) ensureConfigMap(ctx context.Context, vc *cache
 	if err != nil {
 		return "", err
 	}
+	// Data is fully operator-specified with no API-server-defaulted keys, so an
+	// exact DeepEqual is the right gate: skip the no-op Update that would
+	// otherwise bump resourceVersion and emit an audit event on EVERY reconcile
+	// (fleet-scale churn). The hash is returned regardless — it drives the pod
+	// rollout annotation and does not depend on whether we wrote.
+	if equality.Semantic.DeepEqual(desired.Data, existing.Data) &&
+		labelsContained(desired.Labels, existing.Labels) {
+		return hash, nil
+	}
 	existing.Data = desired.Data
 	existing.Labels = desired.Labels
 	if err := r.Update(ctx, &existing); err != nil {
