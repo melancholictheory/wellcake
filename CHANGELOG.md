@@ -4,13 +4,13 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims to
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.7.0]
 
 ### Added
 - Cluster topology now recovers automatically from the loss of a **majority of
-  primaries** — the disaster gossip cannot fix on its own, because voting a
-  replica in needs a master quorum that no longer exists, so the cluster would
-  otherwise sit in `cluster_state:fail` with unserved slots indefinitely. The
+  primaries**. Gossip cannot fix this on its own: voting a replica in needs a
+  master quorum that no longer exists, so the cluster would otherwise sit in
+  `cluster_state:fail` with unserved slots indefinitely. The
   operator confirms each dead primary is fenced from two independent
   perspectives (the k8s API view of pod/node liveness AND a direct data-path
   check), waits out a debounce so it never races a failover gossip could still
@@ -200,6 +200,7 @@ First public release of the operator. Highlights of the initial feature set:
 - CEL XValidation for immutable and conditional fields; config-hash-driven
   rolling restarts; version-gated Valkey 9.x resilience directives.
 
+[0.7.0]: https://github.com/melancholictheory/wellcake/releases/tag/v0.7.0
 [0.6.0]: https://github.com/melancholictheory/wellcake/releases/tag/v0.6.0
 [0.5.1]: https://github.com/melancholictheory/wellcake/releases/tag/v0.5.1
 [0.5.0]: https://github.com/melancholictheory/wellcake/releases/tag/v0.5.0
