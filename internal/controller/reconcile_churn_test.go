@@ -295,3 +295,56 @@ func TestEnsurePDBSkipsNoOpAndSwitchesBudget(t *testing.T) {
 		t.Fatalf("budget not switched: min=%v max=%v", pdb.Spec.MinAvailable, pdb.Spec.MaxUnavailable)
 	}
 }
+
+// ensureConfigMap returns the pod-rollout hash and must skip a no-op reconcile;
+// a real config change (here a rotated password re-rendering valkey.conf) must
+// still write and change the hash. Data is fully operator-owned with no
+// API-server-defaulted keys, so the gate is an exact DeepEqual.
+func TestEnsureConfigMapSkipsNoOpAndUpdatesOnChange(t *testing.T) {
+	scheme := newTestScheme(t)
+	vc := minimalCR()
+	vc.Namespace, vc.Name, vc.UID = "ns", "vk", types.UID("u1")
+	key := types.NamespacedName{Namespace: "ns", Name: configMapName(vc)}
+
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(vc).Build()
+	r := &ValkeyClusterReconciler{Client: c, Scheme: scheme}
+
+	// create.
+	h0, err := r.ensureConfigMap(context.Background(), vc, "pw-1")
+	if err != nil {
+		t.Fatalf("initial ensureConfigMap: %v", err)
+	}
+	if h0 == "" {
+		t.Fatal("ensureConfigMap returned an empty hash")
+	}
+	rv0 := rvOf(t, c, &corev1.ConfigMap{}, key)
+
+	// no-op: identical desired must not write, and must return the same hash.
+	h1, err := r.ensureConfigMap(context.Background(), vc, "pw-1")
+	if err != nil {
+		t.Fatalf("no-op ensureConfigMap: %v", err)
+	}
+	if h1 != h0 {
+		t.Fatalf("no-op ensureConfigMap changed hash %s->%s", h0, h1)
+	}
+	if rv := rvOf(t, c, &corev1.ConfigMap{}, key); rv != rv0 {
+		t.Fatalf("no-op ensureConfigMap bumped resourceVersion %s->%s (churn)", rv0, rv)
+	}
+
+	// change a config key: a rotated password re-renders valkey.conf → MUST write,
+	// change the hash, and land the new Data.
+	h2, err := r.ensureConfigMap(context.Background(), vc, "pw-2")
+	if err != nil {
+		t.Fatalf("changed ensureConfigMap: %v", err)
+	}
+	var got corev1.ConfigMap
+	if rv := rvOf(t, c, &got, key); rv == rv0 {
+		t.Fatal("config change was skipped (gate too aggressive)")
+	}
+	if h2 == h0 {
+		t.Fatalf("hash unchanged after config change: %s", h2)
+	}
+	if configHashFromData(got.Data) != h2 {
+		t.Fatalf("live Data does not reflect the change: returned hash %s, live-data hash %s", h2, configHashFromData(got.Data))
+	}
+}
