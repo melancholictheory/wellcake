@@ -72,7 +72,7 @@ type ValkeyClusterReconciler struct {
 // +kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=services;configmaps;secrets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=persistentvolumeclaims,verbs=get;list;watch;update;patch
-// +kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch;delete
+// +kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch;patch;delete
 // +kubebuilder:rbac:groups=core,resources=nodes,verbs=get;list;watch
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 // +kubebuilder:rbac:groups=policy,resources=poddisruptionbudgets,verbs=get;list;watch;create;update;patch;delete
@@ -179,6 +179,13 @@ func (r *ValkeyClusterReconciler) reconcileReplication(ctx context.Context, vc *
 	if err := r.ensureClientService(ctx, vc); err != nil {
 		return ctrl.Result{}, fmt.Errorf("client service: %w", err)
 	}
+	// Primary-only Service: the client Service above load-balances across the
+	// primary and its replicas, so a write client needs a stable endpoint that
+	// resolves to just the primary. ensureRoleLabels (below) points it at the
+	// current primary and moves it on failover.
+	if err := r.ensurePrimaryService(ctx, vc); err != nil {
+		return ctrl.Result{}, fmt.Errorf("primary service: %w", err)
+	}
 	configHash, err := r.ensureConfigMap(ctx, vc, password)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("configmap: %w", err)
@@ -247,6 +254,12 @@ func (r *ValkeyClusterReconciler) reconcileReplication(ctx context.Context, vc *
 		// at the application layer; we requeue periodically so failover can
 		// notice a hung primary even if the pod is still Running.
 		requeueAfter = 15 * time.Second
+	}
+
+	// Point the primary Service at the current primary (and mark the rest as
+	// replicas). Best-effort: a failed patch is retried on the next reconcile.
+	if err := r.ensureRoleLabels(ctx, vc, primary); err != nil {
+		log.Error(err, "role labels")
 	}
 
 	res, err := r.updateStatus(ctx, vc, sts, primary)

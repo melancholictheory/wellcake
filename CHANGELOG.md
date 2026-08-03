@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims to
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Replication clusters now get a `<cluster>-primary` Service that resolves to the
+  current primary only, giving write clients a stable endpoint. The cluster-wide
+  client Service (`<cluster>`) load-balances across the primary and its replicas,
+  so a client that must write would randomly land on a read-only replica. The
+  operator stamps a `valkey.wellcake.io/role` label (`primary`/`replica`) on the
+  data pods and moves it on failover, and the primary Service selects
+  `role=primary`. Fixes [#30](https://github.com/melancholictheory/wellcake/issues/30).
+
 ## [0.7.0]
 
 ### Added
