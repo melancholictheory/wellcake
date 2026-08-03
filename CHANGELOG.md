@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims to
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- Replicas now authenticate to their primary as a dedicated, least-privilege ACL
+  user (`replicator`, granting only `+psync +replconf +ping` and no key access)
+  via `masteruser`, instead of the full-access default user, so a leaked
+  replication credential can neither read nor write data. It is seeded for every
+  replicating topology (all but Standalone). Password rotation re-keys it (and the
+  Sentinel user) in place, so an in-place rotation keeps the replica links alive.
+  The `replicator` and `sentinel-user` names are reserved and rejected by ValkeyACL.
+
 ## [0.6.0]
 
 ### Changed

@@ -405,11 +405,7 @@ func renderValkeyConf(vc *cachev1beta1.ValkeyCluster, password string) string {
 	fmt.Fprintf(&b, "bind 0.0.0.0\n")
 	fmt.Fprintf(&b, "protected-mode no\n")
 	fmt.Fprintf(&b, "dir %s\n", dataMountPath)
-	if password != "" {
-		quotedPassword := valkeyConfigArg(password)
-		fmt.Fprintf(&b, "requirepass %s\n", quotedPassword)
-		fmt.Fprintf(&b, "masterauth %s\n", quotedPassword)
-	}
+	renderAuthConfig(&b, vc, password)
 
 	// Persist ACL state on the data PVC so users survive pod restarts.
 	// `ACL SAVE` (called by ValkeyACLReconciler) writes here; Valkey loads
@@ -664,9 +660,25 @@ func renderInitScript(vc *cachev1beta1.ValkeyCluster) string {
 		sentinelReseed = fmt.Sprintf("    echo \"user %s on #$PW_HASH &* %s\" >> %s/users.acl.new\n",
 			sentinelACLUser, sentinelACLCommands, dataMountPath)
 	}
+	// Every replicating topology (all but Standalone) also seeds the dedicated
+	// replication user a replica authenticates as (masteruser) — minimal commands,
+	// no key glob, so it is far less exposed than the default user.
+	replSeed, replReseed := "", ""
+	if topologyReplicates(vc) {
+		replSeed = fmt.Sprintf("    echo \"user %s on #$PW_HASH %s\" >> %s/users.acl\n",
+			replicationACLUser, replicationACLCommands, dataMountPath)
+		replReseed = fmt.Sprintf("    echo \"user %s on #$PW_HASH %s\" >> %s/users.acl.new\n",
+			replicationACLUser, replicationACLCommands, dataMountPath)
+	}
+	managedSeed := sentinelSeed + replSeed
+	managedReseed := sentinelReseed + replReseed
+	// Extra operator-managed user names for the reseed grep (the template already
+	// lists `default`). Listing a user that isn't in the file is harmless.
+	managedUsersRe := fmt.Sprintf("%s|%s", sentinelACLUser, replicationACLUser)
 	// users.acl seeding. Valkey applies `requirepass` first, then loads the
 	// aclfile, and the aclfile is authoritative — so the operator-managed users
-	// (default, plus the Sentinel user) carry the password as a SHA-256 hash here.
+	// (default, plus the Sentinel and replication users) carry the password as a
+	// SHA-256 hash here.
 	// When the password changes (e.g. a rotated auth.existingSecret, which
 	// re-renders requirepass and rolls the pods) the seeded hash no longer matches,
 	// so we rewrite ONLY the operator-managed user lines and preserve any other
@@ -700,7 +712,7 @@ valkey_config_arg() {
     END { printf "\"\n" }
   '
 }
-	`, configMountPath, dataMountPath, sentinelSeed, sentinelReseed, sentinelACLUser)
+	`, configMountPath, dataMountPath, managedSeed, managedReseed, managedUsersRe)
 
 	// Multi-region: every pod (including pod-0) replicates from an external
 	// primary. Local primary/replica entrypoint logic is bypassed.
@@ -1404,6 +1416,59 @@ func tcpProbe(port int32, initial, period int32) *corev1.Probe {
 
 func tlsEnabled(vc *cachev1beta1.ValkeyCluster) bool {
 	return vc.Spec.TLS != nil && vc.Spec.TLS.Enabled
+}
+
+// topologyReplicates reports whether the topology has replicas that connect to a
+// primary (so a dedicated replication user is worth seeding). Standalone is the
+// only topology with no replication link.
+func topologyReplicates(vc *cachev1beta1.ValkeyCluster) bool {
+	return vc.Spec.Topology != cachev1beta1.TopologyStandalone
+}
+
+// isReservedACLUser reports whether an ACL user is operator-managed (the default
+// user plus the dedicated Sentinel and replication identities) and so must never
+// be dropped by the ValkeyACL reconciler. The webhook rejects the same names.
+func isReservedACLUser(name string) bool {
+	return name == "default" || name == sentinelACLUser || name == replicationACLUser
+}
+
+// managedACLUser is an operator-seeded non-default ACL user plus the ACL rules
+// (channels + commands) that define it.
+type managedACLUser struct {
+	name  string
+	rules string
+}
+
+// managedNonDefaultUsers returns the operator-managed ACL users (besides default)
+// this topology seeds, so password rotation can re-key them along with default.
+// Their password always matches the cluster auth password; leaving them stale
+// after a rotation would break the replica links (masteruser) and Sentinel.
+func managedNonDefaultUsers(vc *cachev1beta1.ValkeyCluster) []managedACLUser {
+	var users []managedACLUser
+	if topologyReplicates(vc) {
+		users = append(users, managedACLUser{replicationACLUser, replicationACLCommands})
+	}
+	if vc.Spec.Topology == cachev1beta1.TopologySentinel {
+		users = append(users, managedACLUser{sentinelACLUser, "&* " + sentinelACLCommands})
+	}
+	return users
+}
+
+// renderAuthConfig writes the auth directives into valkey.conf. Replicas
+// authenticate to their primary as the dedicated, least-privilege replication
+// user (seeded in users.acl by renderInitScript) rather than the full-access
+// default user; only replicating topologies need it, and the operator's own
+// control connections keep using the default user.
+func renderAuthConfig(b *strings.Builder, vc *cachev1beta1.ValkeyCluster, password string) {
+	if password == "" {
+		return
+	}
+	quotedPassword := valkeyConfigArg(password)
+	fmt.Fprintf(b, "requirepass %s\n", quotedPassword)
+	fmt.Fprintf(b, "masterauth %s\n", quotedPassword)
+	if topologyReplicates(vc) {
+		fmt.Fprintf(b, "masteruser %s\n", replicationACLUser)
+	}
 }
 
 // sourceCAMergeEnabled reports whether this cluster pulls from an external TLS

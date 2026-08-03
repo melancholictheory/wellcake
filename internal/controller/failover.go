@@ -136,6 +136,23 @@ func (c *replClient) aclAddDefaultPassword(ctx context.Context, password string)
 	return c.rdb.Do(ctx, "ACL", "SETUSER", "default", ">"+password).Err()
 }
 
+// aclSetManagedUser re-keys an operator-managed non-default user (the replication
+// or Sentinel identity) during rotation, fully re-specifying its rules so the
+// call is correct even if the user was not yet present live (e.g. an upgrade that
+// added it). additive=true keeps the old password (ACL accepts old+new during the
+// transition); additive=false resets to only the new one at cutover.
+func (c *replClient) aclSetManagedUser(ctx context.Context, name, rules, password string, additive bool) error {
+	args := []any{"ACL", "SETUSER", name, "on"}
+	if !additive {
+		args = append(args, "resetpass")
+	}
+	args = append(args, ">"+password)
+	for tok := range strings.FieldsSeq(rules) {
+		args = append(args, tok)
+	}
+	return c.rdb.Do(ctx, args...).Err()
+}
+
 // aclSave persists the in-memory ACL to the configured aclfile (users.acl on
 // the data PVC). Without it the live `ACL SETUSER` is lost on the next pod
 // restart, which reloads the old password from the on-disk aclfile.
