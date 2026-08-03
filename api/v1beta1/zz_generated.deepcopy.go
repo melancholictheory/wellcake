@@ -670,6 +670,10 @@ func (in *ValkeyClusterStatus) DeepCopyInto(out *ValkeyClusterStatus) {
 		in, out := &in.PrimaryDownSince, &out.PrimaryDownSince
 		*out = (*in).DeepCopy()
 	}
+	if in.QuorumDownSince != nil {
+		in, out := &in.QuorumDownSince, &out.QuorumDownSince
+		*out = (*in).DeepCopy()
+	}
 	if in.ShardDetails != nil {
 		in, out := &in.ShardDetails, &out.ShardDetails
 		*out = make([]ShardStatus, len(*in))

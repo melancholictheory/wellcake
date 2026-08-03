@@ -184,6 +184,40 @@ func (c *replClient) clusterFailover(ctx context.Context) error {
 	return c.rdb.Do(ctx, "CLUSTER", "FAILOVER").Err()
 }
 
+// clusterFailoverTakeover issues CLUSTER FAILOVER TAKEOVER on THIS node (must be
+// a replica). Unlike the graceful CLUSTER FAILOVER, TAKEOVER does NOT coordinate
+// with the (dead) primary and does NOT need a master quorum to authorize the
+// promotion: the replica unilaterally bumps its configEpoch above every peer and
+// claims its primary's slots. It is the ONLY recovery for a Cluster that has lost
+// the majority of its primaries — gossip cannot vote a failover without a quorum.
+// It is unsafe to run while the old primary is alive (two owners for the same
+// slots → split-brain), so the caller MUST fence the primary first (confirm it is
+// gone via the k8s API and delete its pod). See maybeRecoverClusterQuorum.
+func (c *replClient) clusterFailoverTakeover(ctx context.Context) error {
+	return c.rdb.Do(ctx, "CLUSTER", "FAILOVER", "TAKEOVER").Err()
+}
+
+// clusterInfoMap parses `CLUSTER INFO` into a flat key/value map. The operator
+// reads cluster_state ("ok" | "fail") and cluster_slots_assigned from it to tell
+// whether the cluster is currently serving all slots.
+func (c *replClient) clusterInfoMap(ctx context.Context) (map[string]string, error) {
+	res, err := c.rdb.Do(ctx, "CLUSTER", "INFO").Text()
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]string{}
+	for line := range strings.SplitSeq(res, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if i := strings.Index(line, ":"); i > 0 {
+			out[line[:i]] = strings.TrimSpace(line[i+1:])
+		}
+	}
+	return out, nil
+}
+
 // sentinelFailover asks THIS Sentinel to fail the monitored master over to a
 // replica (SENTINEL FAILOVER <name>). The Sentinel quorum picks the best replica
 // (priority/offset), promotes it, and reconfigures the rest. Used by the

@@ -584,6 +584,17 @@ type ValkeyClusterStatus struct {
 	// +optional
 	PrimaryDownSince *metav1.Time `json:"primaryDownSince,omitempty"`
 
+	// QuorumDownSince is when the operator first observed the Cluster topology
+	// stuck in cluster_state:fail with a majority of primaries unreachable —
+	// the state gossip cannot self-heal, because authorizing a replica failover
+	// needs a master quorum that no longer exists. It debounces operator-driven
+	// quorum recovery (CLUSTER FAILOVER TAKEOVER): the operator only intervenes
+	// after the cluster has been stuck for the recovery threshold, giving gossip
+	// time to promote replicas on its own where a quorum still exists. Cleared
+	// once the cluster reports cluster_state:ok again.
+	// +optional
+	QuorumDownSince *metav1.Time `json:"quorumDownSince,omitempty"`
+
 	// InternalEndpoint is the in-cluster client endpoint (host:port) of the
 	// client Service, for consumers to connect to. Surfaced here so wrappers
 	// (e.g. a Crossplane Composition) can project it without recomputing names.
