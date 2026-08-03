@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
@@ -194,6 +195,28 @@ func configHashFromData(data map[string]string) string {
 		h.Write([]byte{0})
 	}
 	return hex.EncodeToString(h.Sum(nil))[:16]
+}
+
+// appliedHashAnnotation stamps a resource with the hash of the operator-owned
+// fields it was last reconciled to, so the next reconcile can skip a no-op
+// Update.
+const appliedHashAnnotation = "valkey.wellcake.io/applied-hash"
+
+// appliedSpecHash is a deterministic hash of the operator-owned fields of a
+// resource. It backs the diff gate for the pod-template-bearing resources
+// (StatefulSet, backup CronJob) whose specs carry BOTH server-defaulted fields
+// AND operator-owned lists that can shrink. Unlike DeepDerivative it detects a
+// REMOVED element (a dropped sidecar container, volume, or port — DeepDerivative
+// treats a shorter desired list as an already-satisfied prefix); unlike DeepEqual
+// it ignores API-server defaults, because it hashes the DESIRED value and never
+// the live object. json.Marshal sorts map keys, so the output is stable.
+func appliedSpecHash(v any) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return "" // unhashable → never matches → always Update (safe fallback)
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
 }
 
 func generatePassword(n int) (string, error) {

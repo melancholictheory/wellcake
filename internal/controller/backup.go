@@ -48,6 +48,14 @@ func (r *ValkeyClusterReconciler) ensureBackupCronJob(ctx context.Context, vc *c
 	if err := controllerutil.SetControllerReference(vc, desired, r.Scheme); err != nil {
 		return err
 	}
+	// Hash-gated like the StatefulSet: the Job pod template carries server defaults
+	// and operator-owned lists that can shrink (a TLS volume or an auth env var
+	// dropped), so a DeepDerivative/DeepEqual compare is either churny or unsafe.
+	desiredHash := appliedSpecHash([]any{desired.Spec, desired.Labels})
+	if desired.Annotations == nil {
+		desired.Annotations = map[string]string{}
+	}
+	desired.Annotations[appliedHashAnnotation] = desiredHash
 
 	var existing batchv1.CronJob
 	err := r.Get(ctx, key, &existing)
@@ -57,8 +65,15 @@ func (r *ValkeyClusterReconciler) ensureBackupCronJob(ctx context.Context, vc *c
 	if err != nil {
 		return err
 	}
+	if existing.Annotations[appliedHashAnnotation] == desiredHash {
+		return nil
+	}
 	existing.Spec = desired.Spec
 	existing.Labels = desired.Labels
+	if existing.Annotations == nil {
+		existing.Annotations = map[string]string{}
+	}
+	existing.Annotations[appliedHashAnnotation] = desiredHash
 	return r.Update(ctx, &existing)
 }
 
