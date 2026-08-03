@@ -276,7 +276,13 @@ kubectl -n <ns> exec <cluster>-0 -- valkey-cli -a "$PW" --no-auth-warning \
 ## Connecting a client
 
 Service DNS:
-- `<cluster>.<ns>.svc.cluster.local:6379` (or `:6380` for TLS).
+- `<cluster>.<ns>.svc.cluster.local:6379` (or `:6380` for TLS). This cluster-wide
+  Service load-balances across the primary AND its replicas, so use it for reads
+  or cluster-aware clients, not for writes to a Replication primary.
+- `<cluster>-primary.<ns>.svc.cluster.local:6379` (Replication) resolves to the
+  current primary only and follows failover. Point write clients here. It is
+  backed by a `valkey.wellcake.io/role=primary` label the operator moves between
+  pods, so expect a brief gap during a failover while the label catches up.
 - For Sentinel, ask Sentinel first:
   `<cluster>-sentinel.<ns>.svc.cluster.local:26379`, command
   `SENTINEL get-master-addr-by-name mymaster`.

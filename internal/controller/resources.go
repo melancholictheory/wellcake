@@ -70,6 +70,11 @@ const (
 	instanceLabel              = "app.kubernetes.io/instance"
 	partOfLabel                = "app.kubernetes.io/part-of"
 	managedByLabel             = "app.kubernetes.io/managed-by"
+	// roleLabel marks a data pod's current replication role so a Service can
+	// select just the primary (or just the replicas). The operator stamps it on
+	// every reconcile and moves it on failover; it is NOT part of any workload
+	// selector, so re-stamping is a plain label patch.
+	roleLabel = "valkey.wellcake.io/role"
 
 	// Shared literals used across job/pod/script builders.
 	shellCmd            = "/bin/sh"
@@ -105,6 +110,9 @@ const (
 	// Replication roles as reported by INFO replication / CLUSTER NODES.
 	roleMaster = "master"
 	roleSlave  = "slave"
+	// roleLabel values stamped on data pods (client-facing terminology).
+	rolePrimary = "primary"
+	roleReplica = "replica"
 	// topologyKeyHostname is the node-level failure domain for pod (anti-)affinity.
 	topologyKeyHostname = "kubernetes.io/hostname"
 	// Prometheus metric label names reused across collectors.
@@ -320,6 +328,39 @@ func buildClientService(vc *cachev1beta1.ValkeyCluster) *corev1.Service {
 			Type:     corev1.ServiceTypeClusterIP,
 			Selector: labelsFor(vc),
 			Ports:    ports,
+		},
+	}
+}
+
+func primaryServiceName(vc *cachev1beta1.ValkeyCluster) string { return vc.Name + "-primary" }
+
+// buildPrimaryService is a ClusterIP Service that resolves ONLY to the current
+// primary pod, by selecting the operator-managed role label. The cluster-wide
+// client Service (buildClientService) load-balances across the primary AND its
+// replicas, which breaks a Replication client that must write to the primary;
+// this gives such clients a stable write endpoint (`<cluster>-primary`).
+func buildPrimaryService(vc *cachev1beta1.ValkeyCluster) *corev1.Service {
+	port := valkeyPort
+	if tlsEnabled(vc) {
+		port = valkeyTLSPort
+	}
+	selector := labelsFor(vc)
+	selector[roleLabel] = rolePrimary
+	return &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      primaryServiceName(vc),
+			Namespace: vc.Namespace,
+			Labels:    labelsFor(vc),
+		},
+		Spec: corev1.ServiceSpec{
+			Type:     corev1.ServiceTypeClusterIP,
+			Selector: selector,
+			Ports: []corev1.ServicePort{{
+				Name:       appValkey,
+				Port:       port,
+				TargetPort: intstr.FromInt32(port),
+				Protocol:   corev1.ProtocolTCP,
+			}},
 		},
 	}
 }

@@ -4,7 +4,7 @@
   (dict "apiGroups" (list "") "resources" (list "configmaps" "secrets" "services") "verbs" (list "create" "delete" "get" "list" "patch" "update" "watch"))
   (dict "apiGroups" (list "") "resources" (list "persistentvolumeclaims") "verbs" (list "get" "list" "patch" "update" "watch"))
   (dict "apiGroups" (list "") "resources" (list "events") "verbs" (list "create" "patch"))
-  (dict "apiGroups" (list "") "resources" (list "pods") "verbs" (list "delete" "get" "list" "watch"))
+  (dict "apiGroups" (list "") "resources" (list "pods") "verbs" (list "delete" "get" "list" "patch" "watch"))
   (dict "apiGroups" (list "apps") "resources" (list "statefulsets") "verbs" (list "create" "delete" "get" "list" "patch" "update" "watch"))
   (dict "apiGroups" (list "batch") "resources" (list "jobs") "verbs" (list "create" "delete" "get" "list" "patch" "update" "watch"))
   (dict "apiGroups" (list "batch") "resources" (list "cronjobs") "verbs" (list "create" "delete" "get" "list" "patch" "update" "watch"))
