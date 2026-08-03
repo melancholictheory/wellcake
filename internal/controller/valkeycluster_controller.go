@@ -21,6 +21,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	policyv1 "k8s.io/api/policy/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -286,6 +287,9 @@ func (r *ValkeyClusterReconciler) ensurePDB(ctx context.Context, vc *cachev1beta
 		if err := r.Get(ctx, key, &cur); err != nil {
 			return err
 		}
+		if resourceSettled(desired.Spec, cur.Spec, desired.Labels, cur.Labels) {
+			return nil
+		}
 		cur.Spec = desired.Spec
 		cur.Labels = desired.Labels
 		return r.Update(ctx, &cur)
@@ -313,6 +317,14 @@ func (r *ValkeyClusterReconciler) ensureNetworkPolicy(ctx context.Context, vc *c
 	}
 	if err != nil {
 		return err
+	}
+	// The builder fully specifies the NetworkPolicy spec (Protocol, PolicyTypes,
+	// ports) and the API server defaults nothing inside it, so compare EXACTLY.
+	// DeepDerivative would prefix-match a shortened Ingress port/peer list and
+	// leave a stale allow rule when metrics or an allowFrom entry is removed.
+	if equality.Semantic.DeepEqual(desired.Spec, existing.Spec) &&
+		labelsContained(desired.Labels, existing.Labels) {
+		return nil
 	}
 	existing.Spec = desired.Spec
 	existing.Labels = desired.Labels
@@ -379,6 +391,36 @@ func (r *ValkeyClusterReconciler) ensureClientService(ctx context.Context, vc *c
 	return r.applyService(ctx, desired)
 }
 
+// resourceSettled reports whether the live object already reflects the operator's
+// desired spec, ignoring API-server-defaulted fields the builder leaves unset
+// (revisionHistoryLimit, dnsPolicy, and so on). Guarding an Update with this skips
+// the no-op write that would otherwise fire on EVERY reconcile — an object
+// identical modulo defaults still bumps resourceVersion and emits an audit event,
+// a real API-server load at fleet scale.
+//
+// It is used ONLY for the PodDisruptionBudget, whose spec is a couple of pointers
+// plus a fixed-key selector with no operator-owned list that can shrink. Do NOT
+// use it where a list can lose an element: DeepDerivative treats a shortened
+// desired slice as an already-satisfied prefix and would skip the removal. The
+// other resources pick the right tool for their shape:
+//   - Service ports, NetworkPolicy spec: exact DeepEqual (a shrunk list differs).
+//   - StatefulSet, backup CronJob: a desired-hash annotation (appliedSpecHash) —
+//     the pod template has both server defaults and shrinkable lists.
+func resourceSettled(desiredSpec, liveSpec any, desiredLabels, liveLabels map[string]string) bool {
+	return equality.Semantic.DeepDerivative(desiredSpec, liveSpec) &&
+		labelsContained(desiredLabels, liveLabels)
+}
+
+// labelsContained reports whether every want[k]=v is present and equal in have.
+func labelsContained(want, have map[string]string) bool {
+	for k, v := range want {
+		if have[k] != v {
+			return false
+		}
+	}
+	return true
+}
+
 func (r *ValkeyClusterReconciler) applyService(ctx context.Context, desired *corev1.Service) error {
 	var existing corev1.Service
 	err := r.Get(ctx, client.ObjectKeyFromObject(desired), &existing)
@@ -387,6 +429,15 @@ func (r *ValkeyClusterReconciler) applyService(ctx context.Context, desired *cor
 	}
 	if err != nil {
 		return err
+	}
+	// Ports and Selector are fully specified by the builder (Protocol included), so
+	// compare EXACTLY. DeepDerivative would treat a shortened port list as a
+	// prefix-match and skip the Update — e.g. turning metrics off drops the metrics
+	// port from desired but never removes it live. DeepEqual catches the shrink.
+	if equality.Semantic.DeepEqual(desired.Spec.Ports, existing.Spec.Ports) &&
+		equality.Semantic.DeepEqual(desired.Spec.Selector, existing.Spec.Selector) &&
+		labelsContained(desired.Labels, existing.Labels) {
+		return nil
 	}
 	existing.Spec.Ports = desired.Spec.Ports
 	existing.Spec.Selector = desired.Spec.Selector
@@ -449,6 +500,19 @@ func (r *ValkeyClusterReconciler) applyStatefulSet(ctx context.Context, vc *cach
 	if err := controllerutil.SetControllerReference(vc, desired, r.Scheme); err != nil {
 		return nil, err
 	}
+	// Hash the fields we actually reconcile (below) and stamp it on the object.
+	// The pod template carries API-server defaults (so DeepEqual would churn) and
+	// operator-owned lists that can SHRINK — a metrics sidecar removed, a volume
+	// dropped — which a DeepDerivative check would miss (prefix-match). Comparing
+	// the desired hash against the stored one catches both.
+	desiredHash := appliedSpecHash([]any{
+		desired.Spec.Replicas, desired.Spec.Template, desired.Spec.UpdateStrategy, desired.Labels,
+	})
+	if desired.Annotations == nil {
+		desired.Annotations = map[string]string{}
+	}
+	desired.Annotations[appliedHashAnnotation] = desiredHash
+
 	var existing appsv1.StatefulSet
 	err := r.Get(ctx, client.ObjectKeyFromObject(desired), &existing)
 	if apierrors.IsNotFound(err) {
@@ -477,10 +541,20 @@ func (r *ValkeyClusterReconciler) applyStatefulSet(ctx context.Context, vc *cach
 		if err := r.Get(ctx, client.ObjectKeyFromObject(desired), &cur); err != nil {
 			return err
 		}
+		// Skip the no-op Update when the live STS was last reconciled to the same
+		// desired hash (catches both server-default churn and a shrunk list).
+		if cur.Annotations[appliedHashAnnotation] == desiredHash {
+			existing = cur
+			return nil
+		}
 		cur.Spec.Replicas = desired.Spec.Replicas
 		cur.Spec.Template = desired.Spec.Template
 		cur.Spec.UpdateStrategy = desired.Spec.UpdateStrategy
 		cur.Labels = desired.Labels
+		if cur.Annotations == nil {
+			cur.Annotations = map[string]string{}
+		}
+		cur.Annotations[appliedHashAnnotation] = desiredHash
 		if err := r.Update(ctx, &cur); err != nil {
 			return err
 		}
@@ -587,6 +661,12 @@ func (r *ValkeyClusterReconciler) ensureMetricsServiceMonitor(ctx context.Contex
 	case err != nil:
 		return err
 	}
+	// No diff gate here: the desired spec embeds map[string]string inside the
+	// unstructured object while the live copy is map[string]interface{} throughout,
+	// so any structural compare is a type mismatch (always "changed"). A
+	// ServiceMonitor is one object per cluster and rarely changes, so the
+	// unconditional Update is cheap; a real skip would need canonical-JSON hashing
+	// of the owned fields.
 	existing.Object["spec"] = sm.Object["spec"]
 	existing.SetLabels(sm.GetLabels())
 	return r.Update(ctx, &existing)
