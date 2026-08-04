@@ -59,6 +59,15 @@ spec:
 There is no quorum here — the operator makes the decision itself. If you need
 quorum-based failover, use **Sentinel** below.
 
+Services:
+- `<name>` — client Service across **every** pod (primary + replicas). Use it for
+  reads or for clients that don't care which pod they reach.
+- `<name>-primary` — resolves to the **current primary only** and follows
+  failover, backed by a `valkey.wellcake.io/role=primary` pod label the operator
+  moves. Point write clients here. There is a brief gap during a failover while
+  the label catches up.
+- `<name>-headless` — headless Service for the Valkey pods.
+
 ## Sentinel
 
 Replication plus a separate StatefulSet of sentinel pods that monitor the
@@ -123,6 +132,17 @@ Sharded Valkey with native cluster mode (16384 slots, gossip).
 - `cluster-announce-hostname` and `cluster-preferred-endpoint-type
   hostname` are set so gossip uses stable DNS rather than
   ephemeral pod IPs.
+- **Majority-loss recovery**: gossip fails a single primary over by vote, which
+  needs a master quorum. If the cluster loses more than half its primaries at
+  once, the survivors are not a quorum and gossip cannot promote the healthy
+  replicas, so it sits in `cluster_state:fail` with unserved slots. The operator
+  recovers it: after a 45s debounce and a two-sided fence (k8s pod/node liveness
+  AND a data-path check that the old primary is not serving), it issues `CLUSTER
+  FAILOVER TAKEOVER` on each shard's most up-to-date surviving replica; the
+  re-created primaries rejoin as replicas via their PVCs. Automatic for the Cache
+  profile, opt-in for Durable via `valkey.wellcake.io/quorum-takeover: "true"`
+  (a forced takeover can drop acknowledged writes). See
+  [ADR 0006](adr/0006-majority-primaries-lost-recovery.md).
 
 ```yaml
 apiVersion: cache.wellcake.io/v1alpha1

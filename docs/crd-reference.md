@@ -121,6 +121,7 @@ Short names: `vk`, `vkc`. Printer columns: `Topology`, `Replicas`,
 | `clusterInitialized`    | bool                         | Cluster topology: once true, bootstrap is not run again. |
 | `lastAppliedReplicas`   | int32                        | Cluster topology: a gate for scale-up. |
 | `primaryDownSince`      | metav1.Time                  | When the operator first observed the primary as unreachable; debounces reactive failover (threshold `failoverDownAfter`=20s). |
+| `quorumDownSince`       | metav1.Time                  | Cluster topology: when the operator first observed the cluster stuck below a primary quorum (`cluster_state:fail`); debounces majority-loss recovery (threshold `quorumRecoveryDownAfter`=45s). Cleared on `cluster_state:ok`. See [ADR 0006](adr/0006-majority-primaries-lost-recovery.md). |
 | `lastReshardToken`      | string                       | The value of the `valkey.wellcake.io/reshard` annotation processed most recently (Cluster) — a run-once gate. |
 | `lastFailoverToken`     | string                       | The value of the `valkey.wellcake.io/failover` annotation processed most recently (Replication) — a run-once gate. |
 | `lastPasswordRotationToken` | string                   | The value of the `valkey.wellcake.io/rotate-password` annotation processed most recently — in-place password rotation without a restart, run-once. |

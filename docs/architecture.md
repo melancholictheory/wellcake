@@ -104,11 +104,20 @@ The code has two independent strategies:
      restart);
    - the master is unreachable → the replica with the highest offset is
      selected, `REPLICAOF NO ONE` promotes it, and the rest are retargeted.
+
+   The operator also moves a `valkey.wellcake.io/role` label onto the current
+   primary pod each reconcile, so the `<name>-primary` Service resolves to it and
+   follows the promotion.
 2. **Sentinel** — quorum-driven by the Sentinel pods themselves.
    Operator-driven failover is deliberately disabled in this topology.
 
-In the `Cluster` topology there is no operator-driven failover — native Valkey
-gossip handles it.
+In the `Cluster` topology native Valkey gossip handles ordinary failover. The
+operator steps in only for the one case gossip cannot — a lost primary majority,
+where the survivors are not a quorum and no replica can be voted in. After a
+debounce and a two-sided fence (k8s pod/node liveness AND a data-path check), it
+issues `CLUSTER FAILOVER TAKEOVER` on each shard's surviving replica; automatic
+for Cache, opt-in for Durable via `valkey.wellcake.io/quorum-takeover`. See
+[ADR 0006](adr/0006-majority-primaries-lost-recovery.md).
 
 Because the Replication strategy is operator-arbitrated (bounded by the reconcile
 interval and the operator's own liveness, with a split-brain window on a network

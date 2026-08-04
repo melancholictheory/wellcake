@@ -34,7 +34,7 @@ a single declarative CRD that understands Valkey's failure and scaling semantics
 - [docs/chaos-testing.md](docs/chaos-testing.md) — chaos/integration test plan (network partition, quorum loss, slow BGSAVE, operator crash)
 - [docs/production-readiness.md](docs/production-readiness.md) — production-readiness checklist
 - [docs/valkey-compatibility.md](docs/valkey-compatibility.md) — operator ↔ Valkey version matrix
-- [docs/adr/](docs/adr/) — ADRs: [0001 ASM](docs/adr/0001-atomic-slot-migration.md), [0002 workload primitive (STS vs Deployment)](docs/adr/0002-workload-primitive.md), [0003 build vs adopt](docs/adr/0003-build-vs-adopt.md), [0004 proactive failover on rolling restart](docs/adr/0004-proactive-failover-rolling-restart.md), [0005 per-shard workload](docs/adr/0005-per-shard-workload.md)
+- [docs/adr/](docs/adr/) — ADRs: [0001 ASM](docs/adr/0001-atomic-slot-migration.md), [0002 workload primitive (STS vs Deployment)](docs/adr/0002-workload-primitive.md), [0003 build vs adopt](docs/adr/0003-build-vs-adopt.md), [0004 proactive failover on rolling restart](docs/adr/0004-proactive-failover-rolling-restart.md), [0005 per-shard workload](docs/adr/0005-per-shard-workload.md), [0006 majority-primaries-lost recovery](docs/adr/0006-majority-primaries-lost-recovery.md)
 - [docs/migration-bitnami.md](docs/migration-bitnami.md) — migrating from chart-based deployments
 - [ROADMAP.md](ROADMAP.md) — open questions and direction
 - [CHANGELOG.md](CHANGELOG.md) — change history
@@ -57,12 +57,12 @@ aims to:
 
 ## Topologies
 
-| Topology    | Status | Failover                          |
-| ----------- | ------ | --------------------------------- |
-| Standalone  | ✅     | none                              |
-| Replication | ✅     | operator-driven via `REPLICAOF`   |
-| Sentinel    | ✅     | Sentinel quorum                   |
-| Cluster     | ✅     | native gossip                     |
+| Topology    | Status | Failover                                              |
+| ----------- | ------ | ----------------------------------------------------- |
+| Standalone  | ✅     | none                                                  |
+| Replication | ✅     | operator-driven via `REPLICAOF`                       |
+| Sentinel    | ✅     | Sentinel quorum                                       |
+| Cluster     | ✅     | native gossip + operator recovery on majority loss    |
 
 ## CRDs
 
@@ -78,6 +78,10 @@ aims to:
   `Durable` (noeviction, RDB+AOF, 10Gi PVC)
 - **Operator-driven failover** for Replication: TCP survey every 15s, promote the
   replica with the max offset, split-brain protection after a pod-0 restart
+- **Primary Service** for Replication: a `<cluster>-primary` Service resolving to
+  the current primary only (via a `valkey.wellcake.io/role` pod label the operator
+  moves on failover), so write clients get a stable endpoint separate from the
+  load-balanced cluster-wide Service
 - **Proactive rolling restart** (ADR 0004, opt-in via annotation
   `valkey.wellcake.io/proactive-rollout: "true"`, default OFF) for Replication /
   Cluster / Sentinel: the StatefulSet switches to `OnDelete`, the operator rolls
@@ -94,10 +98,19 @@ aims to:
   Cluster-only, experimental): one StatefulSet + Service per shard — enables
   shard-aware anti-affinity and clean shard scale-down (delete the leaving
   shard's StatefulSet)
+- **Cluster majority-loss recovery** (ADR 0006): when a Cluster loses more than
+  half its primaries at once — the one outage gossip cannot vote a failover
+  through — the operator fences the dead primaries (k8s liveness + a data-path
+  check) and issues `CLUSTER FAILOVER TAKEOVER` on each shard's surviving replica.
+  Automatic for Cache, opt-in for Durable (`valkey.wellcake.io/quorum-takeover`)
 - **Sentinel** with its own StatefulSet, ConfigMap and Service on port 26379
 - **ValkeyACL** — a separate CRD for managing users via `ACL SETUSER ... reset`
   (idempotent through the `reset` token); for Cluster it is applied to all nodes
   of a shard
+- **Least-privilege replication user**: replicas authenticate to their primary as
+  a dedicated `replicator` ACL user (`+psync +replconf +ping`, no key access)
+  instead of the full-access default user, so a leaked replication credential
+  can neither read nor write data (reserved against ValkeyACL)
 - **S3 backups** (CronJob with `valkey-cli --rdb`, retention, SSE, per-shard for
   Cluster) and restore via `spec.restoreFrom`
 - **Multi-region** async replication between clusters via `spec.replicateFrom`
