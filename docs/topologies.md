@@ -59,6 +59,14 @@ spec:
 There is no quorum here — the operator makes the decision itself. If you need
 quorum-based failover, use **Sentinel** below.
 
+> **Two-node caveat:** with only 2 nodes, losing the primary leaves a single
+> reachable pod, and the operator will not promote on one reachable pod (it cannot
+> tell a dead primary from a network partition that isolated it). Failover then
+> waits for the StatefulSet to recreate the failed primary pod before promoting
+> the data-holding replica, so it is noticeably slower than on 3+ nodes (where the
+> operator promotes after just its ~20s failover debounce). Use 3+ replicas (the
+> default), or Sentinel/Cluster, for prompt failover.
+
 Services:
 - `<name>` — client Service across **every** pod (primary + replicas). Use it for
   clients that don't care which pod they reach.
