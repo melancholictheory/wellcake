@@ -2,8 +2,8 @@ apiVersion: v2
 name: valkey-cluster
 description: Wrapper chart for deploying a single ValkeyCluster custom resource
 type: application
-version: 0.7.1
-appVersion: "0.7.1"
+version: 0.7.2
+appVersion: "0.7.2"
 keywords:
   - valkey
   - redis

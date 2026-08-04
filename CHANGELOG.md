@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims to
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.7.2]
 
 ### Added
 - Replication clusters also get a `<cluster>-replicas` Service that load-balances
@@ -221,6 +221,7 @@ First public release of the operator. Highlights of the initial feature set:
 - CEL XValidation for immutable and conditional fields; config-hash-driven
   rolling restarts; version-gated Valkey 9.x resilience directives.
 
+[0.7.2]: https://github.com/melancholictheory/wellcake/releases/tag/v0.7.2
 [0.7.1]: https://github.com/melancholictheory/wellcake/releases/tag/v0.7.1
 [0.7.0]: https://github.com/melancholictheory/wellcake/releases/tag/v0.7.0
 [0.6.0]: https://github.com/melancholictheory/wellcake/releases/tag/v0.6.0
