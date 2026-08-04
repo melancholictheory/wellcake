@@ -78,10 +78,11 @@ aims to:
   `Durable` (noeviction, RDB+AOF, 10Gi PVC)
 - **Operator-driven failover** for Replication: TCP survey every 15s, promote the
   replica with the max offset, split-brain protection after a pod-0 restart
-- **Primary Service** for Replication: a `<cluster>-primary` Service resolving to
-  the current primary only (via a `valkey.wellcake.io/role` pod label the operator
-  moves on failover), so write clients get a stable endpoint separate from the
-  load-balanced cluster-wide Service
+- **Split read/write Services** for Replication: a `<cluster>-primary` Service
+  resolving to the current primary only (for writes) and a `<cluster>-replicas`
+  Service across the replicas only (for reads), driven by a
+  `valkey.wellcake.io/role` pod label the operator moves on failover — separate
+  from the load-balanced cluster-wide `<cluster>` Service
 - **Proactive rolling restart** (ADR 0004, opt-in via annotation
   `valkey.wellcake.io/proactive-rollout: "true"`, default OFF) for Replication /
   Cluster / Sentinel: the StatefulSet switches to `OnDelete`, the operator rolls

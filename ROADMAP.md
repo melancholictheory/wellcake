@@ -33,9 +33,9 @@ consciously accepted **before durable production**.
 
 | # | Risk | Severity | Substance and direction |
 |---|---|---|---|
-| AR1 | Operator is the sole failover arbiter for Replication | high (warning ✅) | `surveyReplication`/promotion runs via requeue every 15s and **only while the operator is alive**. RTO = up to 15s + reconcile; with the operator down there is no failover. For durable workloads this is weaker than data-plane arbitration. **Done:** admission warning on durable+Replication (a soft nudge toward Sentinel/Cluster). **Investigated (cha-04 → diagnostic run, operator log dump): no gap.** The operator **detects a hung primary as unreachable and promotes a replica** (log `promoting replica`). The initial "no failover" was an artifact: the liveness probe **restarts** the hung container within ~8s (DEBUG SLEEP → liveness-fail → restart), so the "hang" turns into a "restart of an empty pod" (handled by the empty-master guard), and with equal/zero data the operator re-adopts the original ordinal. Side note: the diagnostic exposed an **STS conflict churn** (`ensureStatefulSet` failed on "object has been modified" → the whole reconcile errored before the failover step) → **fixed** (RetryOnConflict, see CHANGELOG) — removes promotion delay under racing reconciles. Optional remainder: a hard gate / default durable→Sentinel. Related to EC1. |
+| AR1 | Operator is the sole failover arbiter for Replication | high (warning ✅) | `surveyReplication`/promotion runs via requeue every 15s and **only while the operator is alive**. RTO = up to 15s + reconcile; with the operator down there is no failover. For durable workloads this is weaker than data-plane arbitration. **Done:** admission warning on durable+Replication (a soft nudge toward Sentinel/Cluster). **Investigated (cha-04 → diagnostic run, operator log dump): no gap.** The operator **detects a hung primary as unreachable and promotes a replica** (log `promoting replica`). The initial "no failover" was an artifact: the liveness probe **restarts** the hung container within ~8s (DEBUG SLEEP → liveness-fail → restart), so the "hang" turns into a "restart of an empty pod" (handled by the empty-master guard), and with equal/zero data the operator re-adopts the original ordinal. Side note: the diagnostic exposed an **STS conflict churn** (`ensureStatefulSet` failed on "object has been modified" → the whole reconcile errored before the failover step) → **fixed** (RetryOnConflict, see CHANGELOG) — removes promotion delay under racing reconciles. **Hard gate: done** — the webhook rejects durable+Replication unless `valkey.wellcake.io/accept-replication-durability-risk` is set. The analogous **Cluster** gap (a lost primary majority, which gossip cannot vote a failover through) is closed by **quorum recovery** (ADR 0006): operator-driven `CLUSTER FAILOVER TAKEOVER` after a two-sided fence — automatic for Cache, opt-in for Durable. Related to EC1. |
 | AR2 | Bootstrap idempotency tied to a status flag | **done** | Before `--cluster create` the operator checks the actual `CLUSTER INFO` (pod-0): an already-formed cluster is adopted (`AdoptedExisting`) instead of being re-initialized. Closes the footgun of a lost status flag. |
-| AR3 | Backup/restore asymmetry | high (mostly closed) | Backup is mature (per-shard fanout, retention, SSE, ~~verify~~ ✅ B1). Restore: single-shard ✅, Cluster — ~~per-shard restore-init + bootstrap-safety + adopt + slot manifest in the backup~~ ✅ (C2 incrementally), the remaining gap is **automatic cluster assembly** (ADDSLOTSRANGE/MEET/REPLICATE from the manifest) — currently manual via runbook. |
+| AR3 | Backup/restore asymmetry | high (mostly closed) | Backup is mature (per-shard fanout, retention, SSE, ~~verify~~ ✅ B1). Restore: single-shard ✅, Cluster — ~~per-shard restore-init + bootstrap-safety + adopt + slot manifest in the backup~~ ✅ (C2 incrementally), **automatic cluster assembly** (ADDSLOTSRANGE/MEET/REPLICATE from the manifest) is **done** via the C2 assembly Job. |
 | AR4 | Defaulting in reconcile + no conversion webhook (✅ both addressed) | low | ~~`applyDefaults` in reconcile~~ ✅ E2 (mutating webhook). ~~No API versioning~~ ✅ E1 groundwork — v1beta1 Hub/storage + v1alpha1 spoke + conversion + multiversion CRD; the safe-evolution window is open (remaining: activate `conversion: Webhook` when schemas diverge). |
 | AR5 | Secret rotation requires a manual restart | **done** | The config hash deliberately excludes secrets → a password/TLS change did not roll the pods. ~~Password~~ ✅ S3: in-place rotation without restart via the `valkey.wellcake.io/rotate-password` annotation (live ACL SETUSER on the default user + masterauth, no replication blip). ~~TLS~~ ✅: automatic cert reload on cert-manager renewal (watch on the TLS Secret → live `CONFIG SET tls-cert-file/key/ca`, verified through the TLS handshake itself to bypass the kubelet sync delay, no restart). Verified on a local kind/k3d cluster (Replication+TLS). ~~Remaining: operator dial-ins under mTLS~~ ✅: `dialReplClient` now presents a client cert (`loadMTLSClientCert`) → failover/survey/password rotation work under `tls.mutualTLS` (verified locally: survey→primary, failover kv-0→kv-1). |
 
@@ -92,8 +92,8 @@ immutability is best-in-class (Q6).
 
 | # | What | Priority |
 |---|---|---|
-| S1 | ACL for Sentinel | **mostly done** — Sentinel talks to the master through a dedicated `sentinel-user` (no key access) via `sentinel auth-user`, not as default+requirepass. Remaining: narrow to a minimal per-command set (needs e2e failover validation on a cluster); ACL for the client-to-sentinel/inter-sentinel port — optional |
-| S2 | Pod Security Standards labels on the namespace (`pod-security.kubernetes.io/enforce: restricted`) — add to the Helm chart | low |
+| S1 | ACL for Sentinel | **mostly done** — Sentinel talks to the master through a dedicated `sentinel-user` (no key access) via `sentinel auth-user`, not as default+requirepass. The minimal per-command set is **done** (`sentinelACLCommands`, seeded in `users.acl`). Only optional remains: an ACL on the client-to-sentinel/inter-sentinel port. |
+| S2 | Pod Security Standards labels on the namespace (`pod-security.kubernetes.io/enforce: restricted`) | **done** — the `valkey-cluster` chart can create + label the namespace (`namespace.create`, `namespace.podSecurityStandard`), 0.3.0 |
 | S3 | Password rotation without restart | **done** — operator-initiated in-place rotation via the `valkey.wellcake.io/rotate-password=<token>` annotation (operator-managed Secret). The operator knows the old password from the current Secret → rolls the new one to live pods without restart: an additive pass (the default user accepts old+new, replicas switch masterauth → **no replication blip**), then cutover (drop the old, `ACL SAVE` to users.acl → restart-safe). Once-per-token via an uncached APIReader guard. Verified on a local kind/k3d cluster (3-node Replication: live rotation, 0 restarts, `sync_full` did not grow, restart-safe). ExistingSecret is out of scope (the operator doesn't know the old password). |
 | S4 | Multi-region mTLS with an explicit CA mount | **done** — `replicateFrom.caSecret` (S4): the operator mounts the source cluster's CA itself and merges it with the local CA into a single trust bundle (`/data/ca-bundle.crt`), since Valkey reads one global `tls-ca-cert-file`. The bundle is built in `config-init`, and `tls-reload` points at it too (so renewing the local cert doesn't drop trust in the source CA). Previously the user mounted the source cluster's CA bundle by hand. CEL+webhook require `replicateFrom.tls=true`+`tls.enabled=true`. |
 
@@ -132,7 +132,7 @@ immutability is best-in-class (Q6).
 
 | # | What | Priority |
 |---|---|---|
-| EC1 | Split-brain in Replication between two network partitions: enforceReplication closes the window after a pod-0 restart but is not protected against a network split — needs Sentinel | warning ✅ (AR1) — durable+Replication gives an admission warning; a hard gate is optional |
+| EC1 | Split-brain in Replication between two network partitions: enforceReplication closes the window after a pod-0 restart but is not protected against a network split — needs Sentinel | **gated ✅** (AR1) — the webhook rejects durable+Replication unless `valkey.wellcake.io/accept-replication-durability-risk` is set |
 | EC2 | Scale-down + multi-region combination is untested (should work, but edge cases are possible) | low |
 | EC3 | Active-active / bidirectional replication between ValkeyClusters — impossible in OSS Valkey (only Redis Enterprise) | out of scope |
 
@@ -155,15 +155,20 @@ durable production than the remaining quality/ops tasks.
 5. ~~**T7 envtest in CI**~~ ✅ (infra ready: assets + job).
 6. ~~**S1 Sentinel ACL**~~ ✅ ~~**Op2/Op3 procedures**~~ ✅ — closed.
 
-The priority roadmap backlog is exhausted. Also closed are the design-review
+The priority roadmap backlog is exhausted. **Post-backlog work shipped in 0.7.x:**
+Cluster majority-loss recovery (ADR 0006 — operator quorum takeover after a
+two-sided fence), split read/write Services for Replication (`<cluster>-primary`
+for writes, `<cluster>-replicas` for reads, driven by a role label), and a
+dedicated least-privilege replication ACL user. Also closed are the design-review
 items: STS Parallel + PVC expansion (confirmed bugs), ADR 0002
 (workload primitive), 0003 (build-vs-adopt), 0004 (proactive failover — design +
 implementation: operator-driven rolling restart for Replication/Cluster/Sentinel,
 opt-in via the `valkey.wellcake.io/proactive-rollout` annotation, default OFF),
-0001 (C3/ASM — implemented), 0005 (C1 per-shard workload — implemented),
+0001 (C3/ASM — implemented), 0005 (C1 per-shard workload — implemented), 0006
+(quorum recovery — implemented),
 CODEOWNERS/CONTRIBUTING/prod-readiness/compat-matrix. Residual follow-ups (as
-needed, all requiring live/e2e): a hard gate for AR1, activating
-`conversion: Webhook` (E1), a minimal per-command Sentinel ACL (S1),
+needed, all requiring live/e2e): activating
+`conversion: Webhook` (E1), the optional Sentinel-port ACL (S1),
 **chaos/integration tests** (plan — [docs/chaos-testing.md](docs/chaos-testing.md);
 Layer 1 pod-kill scenarios → Layer 2 under Chaos Mesh) + bus factor + flipping
 the proactive-rollout default after a soak. Low-priority S2/I2/EC2 — on request
@@ -175,11 +180,12 @@ selector — a regression from the failover fix, prioritized), **SC2**
 (`MaxConcurrentReconciles` > 1), **SC4** (immutability on `spec.storage.mode`);
 SC3 (ops guide for 500+) and SC5 (CEL cleanliness) — low priority.
 
-All priority AR problems from the critical review are addressed: AR1 (warning),
+All priority AR problems from the critical review are addressed: AR1 (gated — the
+webhook rejects durable+Replication, plus Cluster quorum recovery),
 AR2 (partially via restore safety), AR3 (B1 + C2 reassembly), AR4 (E2 mutating
-webhook + E1 v1beta1 groundwork). Residual follow-ups: a hard gate for AR1
-(optional), activating `conversion: Webhook` in the CRD/chart (E1, at the first
-v1alpha1/v1beta1 schema divergence).
+webhook + E1 v1beta1 groundwork). Residual follow-ups: activating
+`conversion: Webhook` in the CRD/chart (E1, at the first v1alpha1/v1beta1 schema
+divergence).
 
 Done: T1 (envtest suite), T2 (kuttl advanced e2e: fal/shd/scl/bkp), T3 (mostly —
 unit+RESP mock+envtest finalizer), T4 (webhook tests), T5 (CI lint gate), T6

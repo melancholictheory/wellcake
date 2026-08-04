@@ -186,6 +186,11 @@ func (r *ValkeyClusterReconciler) reconcileReplication(ctx context.Context, vc *
 	if err := r.ensurePrimaryService(ctx, vc); err != nil {
 		return ctrl.Result{}, fmt.Errorf("primary service: %w", err)
 	}
+	// Replica-only Service (`<cluster>-replicas`) for spreading reads across the
+	// replicas; empty of endpoints until a replica is labelled.
+	if err := r.ensureReplicasService(ctx, vc); err != nil {
+		return ctrl.Result{}, fmt.Errorf("replicas service: %w", err)
+	}
 	configHash, err := r.ensureConfigMap(ctx, vc, password)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("configmap: %w", err)

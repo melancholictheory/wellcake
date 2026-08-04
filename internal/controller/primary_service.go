@@ -27,6 +27,19 @@ func (r *ValkeyClusterReconciler) ensurePrimaryService(ctx context.Context, vc *
 	return r.applyService(ctx, desired)
 }
 
+// ensureReplicasService creates/updates the `<cluster>-replicas` Service, a
+// ClusterIP that load-balances across the replica pods only (roleLabel=replica),
+// for spreading reads. It has no endpoints until at least one replica is
+// labelled; on a single-node or all-down cluster it is simply empty, which is
+// correct.
+func (r *ValkeyClusterReconciler) ensureReplicasService(ctx context.Context, vc *cachev1beta1.ValkeyCluster) error {
+	desired := buildReplicasService(vc)
+	if err := controllerutil.SetControllerReference(vc, desired, r.Scheme); err != nil {
+		return err
+	}
+	return r.applyService(ctx, desired)
+}
+
 // ensureRoleLabels stamps the current primary pod with roleLabel=primary and
 // every other data pod with roleLabel=replica, so the primary Service resolves to
 // the right pod. It is called after failover has resolved the primary; `primary`
