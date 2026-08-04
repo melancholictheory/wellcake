@@ -39,6 +39,27 @@ func TestBuildPrimaryServiceSelectsPrimaryRole(t *testing.T) {
 	}
 }
 
+func TestBuildReplicasServiceSelectsReplicaRole(t *testing.T) {
+	vc := &cachev1beta1.ValkeyCluster{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "vk"},
+		Spec:       cachev1beta1.ValkeyClusterSpec{Topology: cachev1beta1.TopologyReplication},
+	}
+	svc := buildReplicasService(vc)
+
+	if svc.Name != "vk-replicas" {
+		t.Fatalf("name=%q, want vk-replicas", svc.Name)
+	}
+	if svc.Spec.Selector[roleLabel] != roleReplica {
+		t.Fatalf("selector must include %s=%s, got %v", roleLabel, roleReplica, svc.Spec.Selector)
+	}
+	if svc.Spec.Selector[instanceLabel] != "vk" {
+		t.Fatalf("selector must keep the instance scope, got %v", svc.Spec.Selector)
+	}
+	if _, ok := svc.Labels[roleLabel]; ok {
+		t.Fatalf("service metadata labels must not include the role selector, got %v", svc.Labels)
+	}
+}
+
 // TestEnsureRoleLabels covers stamping, idempotency (no resourceVersion churn),
 // failover swap, and the empty-primary no-op.
 func TestEnsureRoleLabels(t *testing.T) {

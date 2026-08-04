@@ -61,11 +61,14 @@ quorum-based failover, use **Sentinel** below.
 
 Services:
 - `<name>` — client Service across **every** pod (primary + replicas). Use it for
-  reads or for clients that don't care which pod they reach.
+  clients that don't care which pod they reach.
 - `<name>-primary` — resolves to the **current primary only** and follows
   failover, backed by a `valkey.wellcake.io/role=primary` pod label the operator
   moves. Point write clients here. There is a brief gap during a failover while
   the label catches up.
+- `<name>-replicas` — load-balances across the **replicas only**
+  (`role=replica`), for spreading reads. Empty of endpoints on a single-node
+  cluster; a pod demoted on failover starts serving reads through it.
 - `<name>-headless` — headless Service for the Valkey pods.
 
 ## Sentinel

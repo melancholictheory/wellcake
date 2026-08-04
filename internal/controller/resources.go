@@ -332,23 +332,25 @@ func buildClientService(vc *cachev1beta1.ValkeyCluster) *corev1.Service {
 	}
 }
 
-func primaryServiceName(vc *cachev1beta1.ValkeyCluster) string { return vc.Name + "-primary" }
+func primaryServiceName(vc *cachev1beta1.ValkeyCluster) string  { return vc.Name + "-primary" }
+func replicasServiceName(vc *cachev1beta1.ValkeyCluster) string { return vc.Name + "-replicas" }
 
-// buildPrimaryService is a ClusterIP Service that resolves ONLY to the current
-// primary pod, by selecting the operator-managed role label. The cluster-wide
-// client Service (buildClientService) load-balances across the primary AND its
-// replicas, which breaks a Replication client that must write to the primary;
-// this gives such clients a stable write endpoint (`<cluster>-primary`).
-func buildPrimaryService(vc *cachev1beta1.ValkeyCluster) *corev1.Service {
+// buildRoleService is a ClusterIP Service that resolves to the data pods carrying
+// a given role label (primary or replica). It backs the split endpoints for
+// Replication: the cluster-wide client Service load-balances across EVERY pod,
+// which is wrong both for a client that must reach the primary (writes) and for
+// one that wants to spread reads across replicas only. `<cluster>-primary`
+// selects the primary; `<cluster>-replicas` selects the replicas.
+func buildRoleService(vc *cachev1beta1.ValkeyCluster, name, role string) *corev1.Service {
 	port := valkeyPort
 	if tlsEnabled(vc) {
 		port = valkeyTLSPort
 	}
 	selector := labelsFor(vc)
-	selector[roleLabel] = rolePrimary
+	selector[roleLabel] = role
 	return &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      primaryServiceName(vc),
+			Name:      name,
 			Namespace: vc.Namespace,
 			Labels:    labelsFor(vc),
 		},
@@ -363,6 +365,14 @@ func buildPrimaryService(vc *cachev1beta1.ValkeyCluster) *corev1.Service {
 			}},
 		},
 	}
+}
+
+func buildPrimaryService(vc *cachev1beta1.ValkeyCluster) *corev1.Service {
+	return buildRoleService(vc, primaryServiceName(vc), rolePrimary)
+}
+
+func buildReplicasService(vc *cachev1beta1.ValkeyCluster) *corev1.Service {
+	return buildRoleService(vc, replicasServiceName(vc), roleReplica)
 }
 
 func buildConfigMap(vc *cachev1beta1.ValkeyCluster, password string) *corev1.ConfigMap {

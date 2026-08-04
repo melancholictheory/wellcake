@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims to
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Replication clusters also get a `<cluster>-replicas` Service that load-balances
+  across the replica pods only, for spreading reads. It completes the read/write
+  split started in 0.7.1: `<cluster>-primary` for writes, `<cluster>-replicas` for
+  reads, and the cluster-wide `<cluster>` Service across all pods. It reuses the
+  same `valkey.wellcake.io/role` label the operator already maintains, so a pod
+  demoted on failover starts serving reads through it automatically.
+
 ## [0.7.1]
 
 ### Added

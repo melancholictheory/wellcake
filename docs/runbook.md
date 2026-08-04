@@ -283,6 +283,9 @@ Service DNS:
   current primary only and follows failover. Point write clients here. It is
   backed by a `valkey.wellcake.io/role=primary` label the operator moves between
   pods, so expect a brief gap during a failover while the label catches up.
+- `<cluster>-replicas.<ns>.svc.cluster.local:6379` (Replication) load-balances
+  across the replicas only. Point read-only clients here to spread reads; it is
+  empty on a single-node cluster.
 - For Sentinel, ask Sentinel first:
   `<cluster>-sentinel.<ns>.svc.cluster.local:26379`, command
   `SENTINEL get-master-addr-by-name mymaster`.
