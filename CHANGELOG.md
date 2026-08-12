@@ -4,6 +4,15 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims to
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0]
+
+### Changed
+- Bumped the `github.com/redis/go-redis/v9` client to 9.22.0.
+
+### Fixed
+- The e2e suite retries the cert-manager install, so a transient GitHub download
+  error (a 503) no longer fails the whole pipeline in `BeforeSuite`.
+
 ## [0.7.2]
 
 ### Added
@@ -221,6 +230,7 @@ First public release of the operator. Highlights of the initial feature set:
 - CEL XValidation for immutable and conditional fields; config-hash-driven
   rolling restarts; version-gated Valkey 9.x resilience directives.
 
+[0.8.0]: https://github.com/melancholictheory/wellcake/releases/tag/v0.8.0
 [0.7.2]: https://github.com/melancholictheory/wellcake/releases/tag/v0.7.2
 [0.7.1]: https://github.com/melancholictheory/wellcake/releases/tag/v0.7.1
 [0.7.0]: https://github.com/melancholictheory/wellcake/releases/tag/v0.7.0
