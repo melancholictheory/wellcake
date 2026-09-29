@@ -369,6 +369,7 @@ func buildSentinelStatefulSet(vc *cachev1beta1.ValkeyCluster, proactive bool) *a
 						SecurityContext: containerSecurityContext(vc),
 					}},
 					Volumes:                   volumes,
+					ImagePullSecrets:          vc.Spec.ImagePullSecrets,
 					SecurityContext:           podSecurityContext(vc),
 					Affinity:                  defaultAntiAffinity(vc),
 					TopologySpreadConstraints: defaultTopologySpread(vc),

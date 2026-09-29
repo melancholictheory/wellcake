@@ -29,6 +29,12 @@ profile: Cache
 # Valkey image and pull policy.
 image: valkey/valkey:8.0
 imagePullPolicy: IfNotPresent
+# Secrets (same namespace) used to pull every image of the cluster's pods
+# (Valkey, Sentinel, exporter, backup/restore and cluster-operation Jobs).
+# Example:
+# imagePullSecrets:
+#   - name: regcred
+imagePullSecrets: []
 
 # Number of pods (interpretation depends on topology).
 replicas: 3

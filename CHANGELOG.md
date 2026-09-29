@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims to
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `spec.imagePullSecrets` on `ValkeyCluster` (v1beta1 and v1alpha1) to pull the
+  cluster's images from a private registry. The operator sets it on every pod
+  it creates: the Valkey and Sentinel StatefulSets (including per-shard ones),
+  the backup CronJob, and the restore and cluster bootstrap/scale/reshard Jobs.
+  Leaving it unset changes nothing, so upgrading the operator does not restart
+  existing clusters. The `valkey-cluster` chart exposes it as
+  `imagePullSecrets`.
+
 ## [0.8.2]
 
 ### Changed

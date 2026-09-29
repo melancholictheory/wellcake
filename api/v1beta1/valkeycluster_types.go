@@ -81,6 +81,14 @@ type ValkeyClusterSpec struct {
 	// +optional
 	ImagePullPolicy corev1.PullPolicy `json:"imagePullPolicy,omitempty"`
 
+	// ImagePullSecrets references Secrets (in the ValkeyCluster's namespace)
+	// used to pull the images of every operator-managed pod: the Valkey and
+	// Sentinel StatefulSets, and the backup, restore and cluster-operation Jobs.
+	// Needed when the Valkey, exporter, backup or AWS CLI images live in a
+	// private registry.
+	// +optional
+	ImagePullSecrets []corev1.LocalObjectReference `json:"imagePullSecrets,omitempty"`
+
 	// Replicas is the number of Valkey instances for Standalone/Replication
 	// (1 primary + Replicas-1 replicas). IGNORED for Cluster topology — there the
 	// node count is derived from Shards*(1+ReplicasPerShard); set those instead.

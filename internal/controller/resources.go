@@ -1151,6 +1151,7 @@ func buildStatefulSet(vc *cachev1beta1.ValkeyCluster, configHash string, proacti
 					Tolerations:                   vc.Spec.Tolerations,
 					Affinity:                      affinity,
 					TopologySpreadConstraints:     tsc,
+					ImagePullSecrets:              vc.Spec.ImagePullSecrets,
 					SecurityContext:               podSecurityContext(vc),
 					TerminationGracePeriodSeconds: clusterShutdownGracePeriod(vc),
 				},

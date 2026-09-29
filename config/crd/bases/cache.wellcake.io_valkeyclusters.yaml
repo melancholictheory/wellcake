@@ -1286,6 +1286,28 @@ spec:
                 default: IfNotPresent
                 description: ImagePullPolicy for the Valkey container.
                 type: string
+              imagePullSecrets:
+                description: |-
+                  ImagePullSecrets references Secrets (in the ValkeyCluster's namespace)
+                  used to pull the images of every operator-managed pod. Mirrors v1beta1 so
+                  the field survives v1alpha1↔v1beta1 conversion.
+                items:
+                  description: |-
+                    LocalObjectReference contains enough information to let you locate the
+                    referenced object inside the same namespace.
+                  properties:
+                    name:
+                      default: ""
+                      description: |-
+                        Name of the referent.
+                        This field is effectively required, but due to backwards compatibility is
+                        allowed to be empty. Instances of this type with an empty value here are
+                        almost certainly wrong.
+                        More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                      type: string
+                  type: object
+                  x-kubernetes-map-type: atomic
+                type: array
               logging:
                 description: Logging configures structured server logging for the
                   managed Valkey pods.
@@ -3846,6 +3868,30 @@ spec:
                 default: IfNotPresent
                 description: ImagePullPolicy for the Valkey container.
                 type: string
+              imagePullSecrets:
+                description: |-
+                  ImagePullSecrets references Secrets (in the ValkeyCluster's namespace)
+                  used to pull the images of every operator-managed pod: the Valkey and
+                  Sentinel StatefulSets, and the backup, restore and cluster-operation Jobs.
+                  Needed when the Valkey, exporter, backup or AWS CLI images live in a
+                  private registry.
+                items:
+                  description: |-
+                    LocalObjectReference contains enough information to let you locate the
+                    referenced object inside the same namespace.
+                  properties:
+                    name:
+                      default: ""
+                      description: |-
+                        Name of the referent.
+                        This field is effectively required, but due to backwards compatibility is
+                        allowed to be empty. Instances of this type with an empty value here are
+                        almost certainly wrong.
+                        More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                      type: string
+                  type: object
+                  x-kubernetes-map-type: atomic
+                type: array
               logging:
                 description: Logging configures structured server logging for the
                   managed Valkey pods.

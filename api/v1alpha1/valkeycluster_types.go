@@ -79,6 +79,12 @@ type ValkeyClusterSpec struct {
 	// +optional
 	ImagePullPolicy corev1.PullPolicy `json:"imagePullPolicy,omitempty"`
 
+	// ImagePullSecrets references Secrets (in the ValkeyCluster's namespace)
+	// used to pull the images of every operator-managed pod. Mirrors v1beta1 so
+	// the field survives v1alpha1↔v1beta1 conversion.
+	// +optional
+	ImagePullSecrets []corev1.LocalObjectReference `json:"imagePullSecrets,omitempty"`
+
 	// Replicas is the number of Valkey instances.
 	// For Replication: 1 primary + (Replicas-1) replicas. For Cluster: total nodes (must be >=6 with Shards*ReplicasPerShard).
 	// +kubebuilder:default=3

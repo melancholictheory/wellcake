@@ -15,6 +15,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -1699,6 +1700,64 @@ func TestRenderInitScriptIsValidShell(t *testing.T) {
 				t.Fatalf("generated init script is not valid shell: %v\n%s", err, out)
 			}
 		})
+	}
+}
+
+// spec.imagePullSecrets must reach every operator-managed pod, otherwise a
+// private-registry image pulls fine for the data pods but a Job or the Sentinel
+// STS is stuck in ImagePullBackOff.
+func TestImagePullSecretsPropagateToEveryPod(t *testing.T) {
+	secrets := []corev1.LocalObjectReference{{Name: "regcred"}, {Name: "mirror"}}
+	withSecrets := func(vc *cachev1beta1.ValkeyCluster) *cachev1beta1.ValkeyCluster {
+		vc.Spec.ImagePullSecrets = secrets
+		return vc
+	}
+
+	cvc := withSecrets(minimalCR())
+	cvc.Spec.Topology = cachev1beta1.TopologyCluster
+	cvc.Spec.Shards = ptr.To[int32](3)
+	cvc.Spec.ReplicasPerShard = ptr.To[int32](1)
+	cvc.Status.LastAppliedReplicas = 8
+
+	bvc := withSecrets(minimalCR())
+	bvc.Spec.Backup = &cachev1beta1.BackupSpec{
+		Enabled:  true,
+		Schedule: "0 0 * * *",
+		S3:       &cachev1beta1.S3Spec{Bucket: "b", Region: "r", CredentialsSecret: "creds"},
+	}
+
+	rvc := withSecrets(minimalCR())
+	rvc.Spec.Topology = cachev1beta1.TopologyCluster
+	rvc.Spec.Shards = ptr.To[int32](3)
+	rvc.Spec.RestoreFrom = &cachev1beta1.RestoreSpec{
+		SourceKey: "base-stamp-shard-{shard}.rdb",
+		S3:        &cachev1beta1.S3Spec{Bucket: "bkt", Region: "r", CredentialsSecret: "c"},
+	}
+
+	pods := map[string]corev1.PodSpec{
+		"statefulset": buildStatefulSet(withSecrets(minimalCR()), "h", false).Spec.Template.Spec,
+		"shard":       buildShardStatefulSet(cvc, 0, "h", false).Spec.Template.Spec,
+		"sentinel":    buildSentinelStatefulSet(withSecrets(sentinelCR()), false).Spec.Template.Spec,
+		"bootstrap":   buildBootstrapJob(cvc, "pw", "b").Spec.Template.Spec,
+		"scaleup":     buildScaleUpJob(cvc, "pw", "u").Spec.Template.Spec,
+		"scaledown":   buildScaleDownJob(cvc, "pw", "d").Spec.Template.Spec,
+		"reshard":     buildReshardJob(cvc, "pw", "r").Spec.Template.Spec,
+		"pershard":    buildClusterOpJob(cvc, "n", "op", "pw", "echo hi").Spec.Template.Spec,
+		"backup":      buildBackupCronJob(bvc, "b").Spec.JobTemplate.Spec.Template.Spec,
+		"restore":     buildRestoreAssemblyJob(rvc, "pw", "r").Spec.Template.Spec,
+	}
+	for name, spec := range pods {
+		t.Run(name, func(t *testing.T) {
+			if !equality.Semantic.DeepEqual(spec.ImagePullSecrets, secrets) {
+				t.Errorf("%s pod imagePullSecrets = %v, want %v", name, spec.ImagePullSecrets, secrets)
+			}
+		})
+	}
+
+	// Unset → no imagePullSecrets, so the StatefulSet applied-hash of existing
+	// clusters is unchanged and upgrading the operator triggers no rollout.
+	if got := buildStatefulSet(minimalCR(), "h", false).Spec.Template.Spec.ImagePullSecrets; got != nil {
+		t.Errorf("imagePullSecrets must stay nil when unset, got %v", got)
 	}
 }
 

@@ -10,6 +10,10 @@ spec:
   profile: {{ .Values.profile }}
   image: {{ .Values.image | quote }}
   imagePullPolicy: {{ .Values.imagePullPolicy }}
+  {{- with .Values.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   replicas: {{ .Values.replicas }}
   {{- if eq .Values.topology "Cluster" }}
   shards: {{ .Values.shards }}
