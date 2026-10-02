@@ -98,6 +98,13 @@ tolerations: []
 affinity: {}
 topologySpreadConstraints: []
 
+# Pod / container security context. Empty → operator defaults (restricted PSA).
+# Example:
+# containerSecurityContext:
+#   readOnlyRootFilesystem: true
+podSecurityContext: {}
+containerSecurityContext: {}
+
 podDisruptionBudget:
   # Enabled defaults to true when replicas>1.
   enabled: null

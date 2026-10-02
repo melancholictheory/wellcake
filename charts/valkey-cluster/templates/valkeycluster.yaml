@@ -92,6 +92,14 @@ spec:
   topologySpreadConstraints:
     {{- toYaml . | nindent 4 }}
   {{- end }}
+  {{- with .Values.podSecurityContext }}
+  podSecurityContext:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.containerSecurityContext }}
+  containerSecurityContext:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   {{- if or (kindIs "bool" .Values.podDisruptionBudget.enabled) .Values.podDisruptionBudget.maxUnavailable }}
   podDisruptionBudget:
     {{- if kindIs "bool" .Values.podDisruptionBudget.enabled }}

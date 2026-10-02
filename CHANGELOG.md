@@ -13,6 +13,9 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Valkey containers. When unset the exporter carries no pull policy, as before,
   so upgrading the operator does not restart existing clusters. The
   `valkey-cluster` chart exposes it as `metrics.imagePullPolicy`.
+- The `valkey-cluster` chart exposes `podSecurityContext` and
+  `containerSecurityContext`, which the CRD already supported. They are only
+  rendered when set, so existing releases render unchanged.
 
 ## [0.9.0]
 
