@@ -657,9 +657,15 @@ func (r *ValkeyClusterReconciler) ensureMetricsServiceMonitor(ctx context.Contex
 	sm.SetName(vc.Name)
 	sm.SetNamespace(vc.Namespace)
 	sm.SetLabels(labelsFor(vc))
+	// Unstructured content must be JSON-compatible (map[string]any): a nested
+	// map[string]string makes DeepCopy panic.
+	matchLabels := map[string]any{}
+	for k, v := range labelsFor(vc) {
+		matchLabels[k] = v
+	}
 	sm.Object["spec"] = map[string]any{
 		"selector": map[string]any{
-			"matchLabels": labelsFor(vc),
+			"matchLabels": matchLabels,
 		},
 		"namespaceSelector": map[string]any{
 			"matchNames": []any{vc.Namespace},
@@ -688,9 +694,9 @@ func (r *ValkeyClusterReconciler) ensureMetricsServiceMonitor(ctx context.Contex
 	case err != nil:
 		return err
 	}
-	// No diff gate here: the desired spec embeds map[string]string inside the
-	// unstructured object while the live copy is map[string]interface{} throughout,
-	// so any structural compare is a type mismatch (always "changed"). A
+	// No diff gate here: the desired spec is built from Go values while the live
+	// copy is decoded JSON, so a structural compare is unreliable (it reports
+	// "changed" on mere type differences). A
 	// ServiceMonitor is one object per cluster and rarely changes, so the
 	// unconditional Update is cheap; a real skip would need canonical-JSON hashing
 	// of the owned fields.

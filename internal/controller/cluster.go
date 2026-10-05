@@ -46,6 +46,10 @@ func (r *ValkeyClusterReconciler) reconcileCluster(ctx context.Context, vc *cach
 		return ctrl.Result{}, fmt.Errorf("backup cronjob: %w", err)
 	}
 
+	if err := r.ensureMetricsServiceMonitor(ctx, vc); err != nil {
+		logf.FromContext(ctx).Error(err, "metrics ServiceMonitor")
+	}
+
 	want := totalReplicas(vc)
 	allReady := ready == want && want > 0
 

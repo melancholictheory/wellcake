@@ -18,7 +18,9 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -386,6 +388,54 @@ func TestReconcileClusterBackupCreatesCronJob(t *testing.T) {
 	var cron batchv1.CronJob
 	if err := c.Get(context.Background(), types.NamespacedName{Name: "cbk-backup", Namespace: "ns"}, &cron); err != nil {
 		t.Fatalf("Cluster backup cronjob not created: %v", err)
+	}
+}
+
+// TestReconcileServiceMonitorAllTopologies guards the regression where only
+// reconcileReplication called ensureMetricsServiceMonitor: a Cluster or Sentinel
+// with metrics.serviceMonitor set must get its `<name>` ServiceMonitor like a
+// Standalone/Replication one.
+func TestReconcileServiceMonitorAllTopologies(t *testing.T) {
+	smGVK := schema.GroupVersionKind{Group: "monitoring.coreos.com", Version: "v1", Kind: "ServiceMonitor"}
+	shards := int32(3)
+	for _, tc := range []struct {
+		name string
+		spec cachev1beta1.ValkeyClusterSpec
+	}{
+		{"replication", cachev1beta1.ValkeyClusterSpec{
+			Topology: cachev1beta1.TopologyReplication, Replicas: 3,
+		}},
+		{"cluster", cachev1beta1.ValkeyClusterSpec{
+			Topology: cachev1beta1.TopologyCluster, Shards: &shards,
+		}},
+		{"sentinel", cachev1beta1.ValkeyClusterSpec{
+			Topology: cachev1beta1.TopologySentinel, Replicas: 3,
+			Sentinel: &cachev1beta1.SentinelSpec{Replicas: 3, Quorum: 2},
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			scheme := newTestScheme(t)
+			// Register the Prometheus Operator kind so the fake client serves it
+			// instead of answering NoMatch (which the reconciler skips silently).
+			scheme.AddKnownTypeWithName(smGVK, &unstructured.Unstructured{})
+			scheme.AddKnownTypeWithName(smGVK.GroupVersion().WithKind("ServiceMonitorList"), &unstructured.UnstructuredList{})
+
+			vc := &cachev1beta1.ValkeyCluster{
+				ObjectMeta: metav1.ObjectMeta{Name: "sm", Namespace: "ns"},
+				Spec:       tc.spec,
+			}
+			vc.Spec.Metrics = &cachev1beta1.MetricsSpec{Enabled: true, ServiceMonitor: true}
+			c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(vc).
+				WithStatusSubresource(&cachev1beta1.ValkeyCluster{}).Build()
+			r := &ValkeyClusterReconciler{Client: c, Scheme: scheme}
+			reconcileUntilStable(t, r, types.NamespacedName{Name: vc.Name, Namespace: vc.Namespace})
+
+			sm := &unstructured.Unstructured{}
+			sm.SetGroupVersionKind(smGVK)
+			if err := c.Get(context.Background(), types.NamespacedName{Name: "sm", Namespace: "ns"}, sm); err != nil {
+				t.Fatalf("%s ServiceMonitor not created: %v", tc.name, err)
+			}
+		})
 	}
 }
 

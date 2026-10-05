@@ -18,6 +18,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	cachev1beta1 "github.com/melancholictheory/wellcake/api/v1beta1"
 )
@@ -85,6 +86,9 @@ func (r *ValkeyClusterReconciler) reconcileSentinel(ctx context.Context, vc *cac
 	}
 	if err := r.ensureNetworkPolicy(ctx, vc); err != nil {
 		return ctrl.Result{}, fmt.Errorf("networkpolicy: %w", err)
+	}
+	if err := r.ensureMetricsServiceMonitor(ctx, vc); err != nil {
+		logf.FromContext(ctx).Error(err, "metrics ServiceMonitor")
 	}
 
 	// Sentinel-specific objects.
