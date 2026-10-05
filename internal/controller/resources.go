@@ -79,6 +79,7 @@ const (
 	// Shared literals used across job/pod/script builders.
 	shellCmd            = "/bin/sh"
 	metricsPortName     = "metrics"
+	gossipPortName      = "gossip"
 	backupVolumeName    = "backup"
 	envValkeyPassword   = "VALKEY_PASSWORD"
 	envAWSAccessKey     = "AWS_ACCESS_KEY_ID"
@@ -273,14 +274,14 @@ func buildHeadlessService(vc *cachev1beta1.ValkeyCluster) *corev1.Service {
 	ports := []corev1.ServicePort{{
 		Name:       appValkey,
 		Port:       port,
-		TargetPort: intstr.FromInt32(port),
+		TargetPort: intstr.FromString(appValkey),
 		Protocol:   corev1.ProtocolTCP,
 	}}
 	if vc.Spec.Topology == cachev1beta1.TopologyCluster {
 		ports = append(ports, corev1.ServicePort{
-			Name:       "gossip",
+			Name:       gossipPortName,
 			Port:       clusterBusPort,
-			TargetPort: intstr.FromInt32(clusterBusPort),
+			TargetPort: intstr.FromString(gossipPortName),
 			Protocol:   corev1.ProtocolTCP,
 		})
 	}
@@ -307,14 +308,14 @@ func buildClientService(vc *cachev1beta1.ValkeyCluster) *corev1.Service {
 	ports := []corev1.ServicePort{{
 		Name:       appValkey,
 		Port:       port,
-		TargetPort: intstr.FromInt32(port),
+		TargetPort: intstr.FromString(appValkey),
 		Protocol:   corev1.ProtocolTCP,
 	}}
 	if metricsEnabled(vc) {
 		ports = append(ports, corev1.ServicePort{
 			Name:       metricsPortName,
 			Port:       exporterPort,
-			TargetPort: intstr.FromInt32(exporterPort),
+			TargetPort: intstr.FromString(metricsPortName),
 			Protocol:   corev1.ProtocolTCP,
 		})
 	}
@@ -982,7 +983,7 @@ func buildStatefulSet(vc *cachev1beta1.ValkeyCluster, configHash string, proacti
 	}}
 	if vc.Spec.Topology == cachev1beta1.TopologyCluster {
 		containerPorts = append(containerPorts, corev1.ContainerPort{
-			Name:          "gossip",
+			Name:          gossipPortName,
 			ContainerPort: clusterBusPort,
 			Protocol:      corev1.ProtocolTCP,
 		})

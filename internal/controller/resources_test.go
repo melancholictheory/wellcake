@@ -5,6 +5,7 @@ Copyright 2026 The Wellcake Authors.
 package controller
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,6 +22,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	cachev1beta1 "github.com/melancholictheory/wellcake/api/v1beta1"
 )
@@ -1871,4 +1873,58 @@ func TestBackupAndRestoreJobsHaveRestrictedSecurityContext(t *testing.T) {
 	if !hasHome(restorePod.InitContainers[0]) {
 		t.Error("restore aws-cli (fetch-manifest) container must set HOME=/tmp for non-root")
 	}
+}
+
+// TestServicesTargetNamedPorts guards the Sentinel-topology label overlap: there
+// the data pods and the Sentinel pods carry identical labels, so a Service selector
+// cannot tell them apart. Each Service must target a named port that only its own
+// pods declare, which keeps the other workload out of its EndpointSlices (no client
+// traffic or metrics scrape lands on a pod that does not serve that port).
+func TestServicesTargetNamedPorts(t *testing.T) {
+	vc := &cachev1beta1.ValkeyCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "s", Namespace: "ns"},
+		Spec: cachev1beta1.ValkeyClusterSpec{
+			Topology: cachev1beta1.TopologySentinel, Replicas: 3,
+			Sentinel: &cachev1beta1.SentinelSpec{Replicas: 3, Quorum: 2},
+			Metrics:  &cachev1beta1.MetricsSpec{Enabled: true},
+		},
+	}
+	portNames := func(spec corev1.PodSpec) map[string]bool {
+		out := map[string]bool{}
+		for _, c := range spec.Containers {
+			for _, p := range c.Ports {
+				out[p.Name] = true
+			}
+		}
+		return out
+	}
+	data := portNames(buildStatefulSet(vc, "h", false).Spec.Template.Spec)
+	sentinel := portNames(buildSentinelStatefulSet(vc, false).Spec.Template.Spec)
+
+	check := func(svc string, ports []corev1.ServicePort, own, other map[string]bool) {
+		t.Helper()
+		for _, p := range ports {
+			if p.TargetPort.Type != intstr.String {
+				t.Errorf("%s port %q targets a number, so it also routes to the other workload's pods", svc, p.Name)
+				continue
+			}
+			if name := p.TargetPort.StrVal; !own[name] || other[name] {
+				t.Errorf("%s targetPort %q: declared by its own pods=%v, by the other pods=%v", svc, name, own[name], other[name])
+			}
+		}
+	}
+	check("client", buildClientService(vc).Spec.Ports, data, sentinel)
+	check("headless", buildHeadlessService(vc).Spec.Ports, data, sentinel)
+
+	scheme := newTestScheme(t)
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(vc).Build()
+	r := &ValkeyClusterReconciler{Client: c, Scheme: scheme}
+	if err := r.ensureSentinelService(context.Background(), vc); err != nil {
+		t.Fatalf("ensureSentinelService: %v", err)
+	}
+	var svc corev1.Service
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "ns", Name: sentinelStatefulSetName(vc)}, &svc); err != nil {
+		t.Fatalf("get sentinel Service: %v", err)
+	}
+	check("sentinel", svc.Spec.Ports, sentinel, data)
 }

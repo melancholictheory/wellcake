@@ -244,7 +244,7 @@ func (r *ValkeyClusterReconciler) ensureSentinelService(ctx context.Context, vc 
 			Ports: []corev1.ServicePort{{
 				Name:       componentSentinel,
 				Port:       sentinelPort,
-				TargetPort: intstr.FromInt32(sentinelPort),
+				TargetPort: intstr.FromString(componentSentinel),
 				Protocol:   corev1.ProtocolTCP,
 			}},
 		},

@@ -114,6 +114,11 @@ Services:
 - `<name>-headless` — headless Service for the Valkey pods.
 - `<name>-sentinel` — headless Service for the Sentinel pods on 26379.
 
+Give Sentinel clients the per-pod names, one per Sentinel:
+`<name>-sentinel-0.<name>-sentinel:26379` and so on. The data pods and the
+Sentinel pods carry the same labels, so the headless names `<name>-headless`
+and `<name>-sentinel` each resolve to both sets of pods.
+
 ## Cluster
 
 Sharded Valkey with native cluster mode (16384 slots, gossip).

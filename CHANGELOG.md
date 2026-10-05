@@ -12,6 +12,16 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   topologies. Only the Standalone/Replication path created the ServiceMonitor,
   so a Cluster or Sentinel with it set silently got none and its exporter was
   never scraped.
+- In the Sentinel topology the data pods and the Sentinel pods carry identical
+  labels, so the client Service selected the Sentinel pods too. A connection to
+  `<name>:6379` could land on a Sentinel pod and get refused, and the
+  ServiceMonitor scraped every Sentinel pod on the exporter port, which showed
+  up as one failing target per Sentinel pod. The client, headless and Sentinel
+  Services now target named container ports (`valkey`, `metrics`, `sentinel`)
+  that only the intended pods declare. Only the Service objects change, so
+  upgrading restarts no pods. DNS for the headless names `<name>-headless` and
+  `<name>-sentinel` still returns both sets of pods. Sentinel clients should
+  list the per-pod names `<name>-sentinel-N.<name>-sentinel:26379` instead.
 
 ## [0.10.0]
 
