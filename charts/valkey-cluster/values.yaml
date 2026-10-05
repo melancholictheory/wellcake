@@ -99,8 +99,15 @@ affinity: {}
 topologySpreadConstraints: []
 
 # Pod / container security context. Empty → operator defaults (restricted PSA).
-# Example:
+# Setting either one replaces the operator default for that level (no merge),
+# so keep the restricted fields you still need. Example:
 # containerSecurityContext:
+#   allowPrivilegeEscalation: false
+#   runAsNonRoot: true
+#   capabilities:
+#     drop: ["ALL"]
+#   seccompProfile:
+#     type: RuntimeDefault
 #   readOnlyRootFilesystem: true
 podSecurityContext: {}
 containerSecurityContext: {}
