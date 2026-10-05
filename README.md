@@ -105,6 +105,7 @@ aims to:
   check) and issues `CLUSTER FAILOVER TAKEOVER` on each shard's surviving replica.
   Automatic for Cache, opt-in for Durable (`valkey.wellcake.io/quorum-takeover`)
 - **Sentinel** with its own StatefulSet, ConfigMap and Service on port 26379
+  (26380 with TLS)
 - **ValkeyACL** — a separate CRD for managing users via `ACL SETUSER ... reset`
   (idempotent through the `reset` token); for Cluster it is applied to all nodes
   of a shard

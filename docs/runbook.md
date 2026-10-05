@@ -288,9 +288,10 @@ Service DNS:
   empty on a single-node cluster.
 - For Sentinel, ask Sentinel first:
   `<cluster>-sentinel-0.<cluster>-sentinel.<ns>.svc.cluster.local:26379` (any
-  Sentinel pod works), command `SENTINEL get-master-addr-by-name mymaster`. The
-  bare `<cluster>-sentinel` name also resolves to the data pods, which refuse
-  connections on 26379.
+  Sentinel pod works; use `:26380` with TLS), command
+  `SENTINEL get-master-addr-by-name mymaster`. The bare `<cluster>-sentinel`
+  name also resolves to the data pods, which refuse connections on the
+  Sentinel port.
 
 Smoke test from a pod:
 

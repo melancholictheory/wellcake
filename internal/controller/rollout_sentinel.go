@@ -203,10 +203,7 @@ func (r *ValkeyClusterReconciler) listSentinelRolloutPods(ctx context.Context, v
 // propagates through the quorum — so we try pods in order and return the first
 // one's verdict (including the harmless "already in progress" error).
 func (r *ValkeyClusterReconciler) issueSentinelFailover(ctx context.Context, vc *cachev1beta1.ValkeyCluster, password string) error {
-	port := sentinelPort
-	if tlsEnabled(vc) {
-		port = sentinelPort + 1 // renderSentinelConf moves Sentinel to tls-port = sentinelPort+1
-	}
+	port := sentinelListenPort(vc)
 	var lastErr error
 	for i := int32(0); i < vc.Spec.Sentinel.Replicas; i++ {
 		host := sentinelPodFQDN(vc, i)

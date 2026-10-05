@@ -113,6 +113,7 @@ Services:
 - `<name>` — client Service on the Valkey data port.
 - `<name>-headless` — headless Service for the Valkey pods.
 - `<name>-sentinel` — headless Service for the Sentinel pods on 26379.
+  With TLS it uses 26380.
 
 Give Sentinel clients the per-pod names, one per Sentinel:
 `<name>-sentinel-0.<name>-sentinel:26379` and so on. The data pods and the

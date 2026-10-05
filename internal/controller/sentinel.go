@@ -25,6 +25,7 @@ import (
 
 const (
 	sentinelPort       int32 = 26379
+	sentinelTLSPort    int32 = 26380
 	sentinelMasterName       = "mymaster"
 	sentinelConfigName       = "sentinel.conf"
 	// sentinelACLUser is the dedicated ACL user (seeded on the data nodes by
@@ -199,9 +200,19 @@ tls-key-file %s/tls.key
 tls-ca-cert-file %s/ca.crt
 tls-replication yes
 tls-auth-clients optional
-`, sentinelPort+1, tlsMountPath, tlsMountPath, tlsMountPath)
+`, sentinelTLSPort, tlsMountPath, tlsMountPath, tlsMountPath)
 	}
 	return conf
+}
+
+// sentinelListenPort is the port Sentinel actually serves on. With TLS,
+// renderSentinelConf moves it to tls-port and sets `port 0`, so the container
+// port, the probes, the Service and the operator's own dial must all follow it.
+func sentinelListenPort(vc *cachev1beta1.ValkeyCluster) int32 {
+	if tlsEnabled(vc) {
+		return sentinelTLSPort
+	}
+	return sentinelPort
 }
 
 func (r *ValkeyClusterReconciler) ensureSentinelConfigMap(ctx context.Context, vc *cachev1beta1.ValkeyCluster, password string) error {
@@ -230,6 +241,7 @@ func (r *ValkeyClusterReconciler) ensureSentinelConfigMap(ctx context.Context, v
 }
 
 func (r *ValkeyClusterReconciler) ensureSentinelService(ctx context.Context, vc *cachev1beta1.ValkeyCluster) error {
+	port := sentinelListenPort(vc)
 	svc := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      sentinelStatefulSetName(vc),
@@ -243,7 +255,7 @@ func (r *ValkeyClusterReconciler) ensureSentinelService(ctx context.Context, vc 
 			Selector:                 sentinelLabels(vc),
 			Ports: []corev1.ServicePort{{
 				Name:       componentSentinel,
-				Port:       sentinelPort,
+				Port:       port,
 				TargetPort: intstr.FromString(componentSentinel),
 				Protocol:   corev1.ProtocolTCP,
 			}},
@@ -287,6 +299,7 @@ func buildSentinelStatefulSet(vc *cachev1beta1.ValkeyCluster, proactive bool) *a
 	if image == "" {
 		image = vc.Spec.Image
 	}
+	port := sentinelListenPort(vc)
 
 	// Sentinel rewrites its config file in place on failover, so we copy
 	// it from the ConfigMap to /data on each start (the initContainer pattern).
@@ -364,12 +377,12 @@ func buildSentinelStatefulSet(vc *cachev1beta1.ValkeyCluster, proactive bool) *a
 						Args:    []string{dataMountPath + "/runtime-sentinel.conf", "--sentinel"},
 						Ports: []corev1.ContainerPort{{
 							Name:          componentSentinel,
-							ContainerPort: sentinelPort,
+							ContainerPort: port,
 							Protocol:      corev1.ProtocolTCP,
 						}},
 						VolumeMounts:    volumeMounts,
-						ReadinessProbe:  tcpProbe(sentinelPort, 5, 5),
-						LivenessProbe:   tcpProbe(sentinelPort, 15, 20),
+						ReadinessProbe:  tcpProbe(port, 5, 5),
+						LivenessProbe:   tcpProbe(port, 15, 20),
 						SecurityContext: containerSecurityContext(vc),
 					}},
 					Volumes:                   volumes,

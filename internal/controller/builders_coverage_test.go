@@ -5,13 +5,17 @@ Copyright 2026 The Wellcake Authors.
 package controller
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	cachev1beta1 "github.com/melancholictheory/wellcake/api/v1beta1"
 )
@@ -195,6 +199,61 @@ func TestBuildSentinelStatefulSet(t *testing.T) {
 	}
 	if !hasTLSVol {
 		t.Errorf("TLS sentinel STS must mount the tls volume")
+	}
+}
+
+// With TLS, renderSentinelConf moves Sentinel to tls-port and sets `port 0`.
+// The container port, both probes and the Service must follow it: nothing
+// listens on the plain port, so probes there never pass (the pod never gets
+// Ready and the liveness probe keeps restarting it) and the Service would send
+// clients to a closed port.
+func TestSentinelServesOnTLSPort(t *testing.T) {
+	for _, tlsOn := range []bool{false, true} {
+		vc := sentinelCR()
+		vc.Spec.TLS = &cachev1beta1.TLSSpec{Enabled: tlsOn}
+		want := int32(26379)
+		if tlsOn {
+			want = 26380
+			if c := renderSentinelConf(vc, ""); !strings.Contains(c, "tls-port 26380\n") || !strings.Contains(c, "port 0\n") {
+				t.Fatalf("TLS sentinel.conf must serve on tls-port 26380 only\n%s", c)
+			}
+		}
+
+		c := buildSentinelStatefulSet(vc, false).Spec.Template.Spec.Containers[0]
+		if len(c.Ports) != 1 || c.Ports[0].Name != componentSentinel || c.Ports[0].ContainerPort != want {
+			t.Errorf("tls=%v: sentinel container ports = %+v, want %s:%d", tlsOn, c.Ports, componentSentinel, want)
+		}
+		// A named port resolves against the Sentinel container's own ports.
+		resolve := func(p intstr.IntOrString) int32 {
+			if p.Type == intstr.Int {
+				return p.IntVal
+			}
+			for _, cp := range c.Ports {
+				if cp.Name == p.StrVal {
+					return cp.ContainerPort
+				}
+			}
+			return 0
+		}
+		for name, p := range map[string]*corev1.Probe{"readiness": c.ReadinessProbe, "liveness": c.LivenessProbe} {
+			if p == nil || p.TCPSocket == nil || resolve(p.TCPSocket.Port) != want {
+				t.Errorf("tls=%v: %s probe must dial %d, got %+v", tlsOn, name, want, p)
+			}
+		}
+
+		scheme := newTestScheme(t)
+		cl := fake.NewClientBuilder().WithScheme(scheme).Build()
+		r := &ValkeyClusterReconciler{Client: cl, Scheme: scheme}
+		if err := r.ensureSentinelService(context.Background(), vc); err != nil {
+			t.Fatalf("ensureSentinelService: %v", err)
+		}
+		var svc corev1.Service
+		if err := cl.Get(context.Background(), client.ObjectKey{Namespace: vc.Namespace, Name: sentinelStatefulSetName(vc)}, &svc); err != nil {
+			t.Fatalf("get sentinel Service: %v", err)
+		}
+		if p := svc.Spec.Ports; len(p) != 1 || p[0].Port != want || resolve(p[0].TargetPort) != want {
+			t.Errorf("tls=%v: sentinel Service ports = %+v, want port and targetPort %d", tlsOn, p, want)
+		}
 	}
 }
 

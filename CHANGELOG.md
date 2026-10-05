@@ -22,6 +22,15 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   upgrading restarts no pods. DNS for the headless names `<name>-headless` and
   `<name>-sentinel` still returns both sets of pods. Sentinel clients should
   list the per-pod names `<name>-sentinel-N.<name>-sentinel:26379` instead.
+- The Sentinel topology now works with TLS enabled. With TLS, Sentinel listens
+  only on its TLS port 26380 (`port 0` turns the plain port off), but its
+  container port, its readiness and liveness probes and the `<name>-sentinel`
+  Service still used 26379. The probes never passed, so only
+  `<name>-sentinel-0` was ever created, the liveness probe kept restarting it
+  and the cluster stayed in `Creating`. All of them now use 26380 when TLS is
+  on. A cluster that is already stuck needs one manual step after the upgrade:
+  delete the `<name>-sentinel-0` pod. The StatefulSet does not replace a pod
+  that never became Ready, so that pod keeps the old probes until you delete it.
 
 ## [0.10.0]
 
