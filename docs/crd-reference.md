@@ -52,10 +52,10 @@ Short names: `vk`, `vkc`. Printer columns: `Topology`, `Replicas`,
 | `nodeSelector` / `tolerations`| standard                   | —              | |
 | `affinity`                    | *corev1.Affinity           | hostname anti-affinity | |
 | `topologySpreadConstraints`   | []corev1.TopologySpreadConstraint | zone spread, ScheduleAnyway | |
-| `podDisruptionBudget`         | `PDBSpec`                  | auto when replicas>1 | |
+| `podDisruptionBudget`         | `PDBSpec`                  | auto when replicas>1 | Covers the data pods. In the Sentinel topology the Sentinel pods get their own `<name>-sentinel-pdb` with `maxUnavailable: 1`. `enabled` switches both off; `maxUnavailable` and `minAvailable` apply to the data pods only. |
 | `podDisruptionBudget.enabled` | bool                       | `true`         | |
 | `podDisruptionBudget.maxUnavailable` / `minAvailable` | IntOrString | `1` / nil | |
-| `networkPolicy`               | `NetworkPolicySpec`        | disabled       | |
+| `networkPolicy`               | `NetworkPolicySpec`        | disabled       | Opens the data port, the exporter port when metrics are on, and the Sentinel port in the Sentinel topology. |
 | `networkPolicy.enabled`       | bool                       | `false`        | |
 | `networkPolicy.allowFrom`     | []NetworkPolicyPeer        | same-namespace | Always plus Valkey-to-Valkey. |
 | `backup`                      | `BackupSpec`               | disabled       | |

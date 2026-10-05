@@ -1175,6 +1175,14 @@ func buildPDB(vc *cachev1beta1.ValkeyCluster) *policyv1.PodDisruptionBudget {
 			MaxUnavailable: &maxU,
 		},
 	}
+	if names := sentinelPodNames(vc); vc.Spec.Topology == cachev1beta1.TopologySentinel && len(names) > 0 {
+		// The Sentinel pods carry the same labels as the data pods (and the
+		// StatefulSet selectors are immutable), so leave them out by pod name.
+		// They get their own budget from buildSentinelPDB.
+		pdb.Spec.Selector.MatchExpressions = []metav1.LabelSelectorRequirement{{
+			Key: appsv1.StatefulSetPodNameLabel, Operator: metav1.LabelSelectorOpNotIn, Values: names,
+		}}
+	}
 	if spec := vc.Spec.PodDisruptionBudget; spec != nil {
 		if spec.MinAvailable != nil {
 			pdb.Spec.MinAvailable = spec.MinAvailable
@@ -1204,6 +1212,13 @@ func buildNetworkPolicy(vc *cachev1beta1.ValkeyCluster) *networkingv1.NetworkPol
 	if metricsEnabled(vc) {
 		mp := intstr.FromInt32(exporterPort)
 		ports = append(ports, networkingv1.NetworkPolicyPort{Protocol: &proto, Port: &mp})
+	}
+	if vc.Spec.Topology == cachev1beta1.TopologySentinel {
+		// The Sentinel pods share the data pods' labels, so this policy isolates
+		// them too: without their port, clients and new Sentinel-to-Sentinel
+		// connections are refused.
+		sp := intstr.FromInt32(sentinelListenPort(vc))
+		ports = append(ports, networkingv1.NetworkPolicyPort{Protocol: &proto, Port: &sp})
 	}
 
 	peers := []networkingv1.NetworkPolicyPeer{}

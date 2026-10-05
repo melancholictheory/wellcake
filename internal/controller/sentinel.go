@@ -11,6 +11,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	policyv1 "k8s.io/api/policy/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -82,8 +83,13 @@ func (r *ValkeyClusterReconciler) reconcileSentinel(ctx context.Context, vc *cac
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("statefulset: %w", err)
 	}
+	// Data budget first: it stops counting the Sentinel pods before their own
+	// budget starts, so no pod is ever covered by both (eviction rejects that).
 	if err := r.ensurePDB(ctx, vc); err != nil {
 		return ctrl.Result{}, fmt.Errorf("pdb: %w", err)
+	}
+	if err := r.applyPDB(ctx, vc, buildSentinelPDB(vc)); err != nil {
+		return ctrl.Result{}, fmt.Errorf("sentinel pdb: %w", err)
 	}
 	if err := r.ensureNetworkPolicy(ctx, vc); err != nil {
 		return ctrl.Result{}, fmt.Errorf("networkpolicy: %w", err)
@@ -401,4 +407,41 @@ func sentinelLabels(vc *cachev1beta1.ValkeyCluster) map[string]string {
 	l := labelsFor(vc)
 	l[componentLabel] = componentSentinel
 	return l
+}
+
+// sentinelPodNames lists the Sentinel StatefulSet's pod names. Selectors use
+// them because the Sentinel pods carry the same labels as the data pods.
+func sentinelPodNames(vc *cachev1beta1.ValkeyCluster) []string {
+	if vc.Spec.Sentinel == nil {
+		return nil
+	}
+	names := make([]string, 0, vc.Spec.Sentinel.Replicas)
+	for i := int32(0); i < vc.Spec.Sentinel.Replicas; i++ {
+		names = append(names, fmt.Sprintf("%s-%d", sentinelStatefulSetName(vc), i))
+	}
+	return names
+}
+
+// buildSentinelPDB keeps a drain from evicting more than one Sentinel at a time,
+// so the quorum survives. It is separate from the data budget, which excludes
+// the Sentinel pods, and does not take spec.podDisruptionBudget values: those
+// are sized for the data pods.
+func buildSentinelPDB(vc *cachev1beta1.ValkeyCluster) *policyv1.PodDisruptionBudget {
+	maxU := intstr.FromInt32(1)
+	return &policyv1.PodDisruptionBudget{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      sentinelStatefulSetName(vc) + "-pdb",
+			Namespace: vc.Namespace,
+			Labels:    sentinelLabels(vc),
+		},
+		Spec: policyv1.PodDisruptionBudgetSpec{
+			Selector: &metav1.LabelSelector{
+				MatchLabels: sentinelLabels(vc),
+				MatchExpressions: []metav1.LabelSelectorRequirement{{
+					Key: appsv1.StatefulSetPodNameLabel, Operator: metav1.LabelSelectorOpIn, Values: sentinelPodNames(vc),
+				}},
+			},
+			MaxUnavailable: &maxU,
+		},
+	}
 }

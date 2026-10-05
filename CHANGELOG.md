@@ -31,6 +31,20 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   on. A cluster that is already stuck needs one manual step after the upgrade:
   delete the `<name>-sentinel-0` pod. The StatefulSet does not replace a pod
   that never became Ready, so that pod keeps the old probes until you delete it.
+- With `spec.networkPolicy.enabled` in the Sentinel topology, the generated
+  NetworkPolicy also covered the Sentinel pods, which carry the same labels as
+  the data pods, but opened only the data and exporter ports. Clients could not
+  reach Sentinel on 26379, and Sentinels could not open new connections to each
+  other. A link that dropped, for example after a Sentinel restart, did not come
+  back, so a failover could lose its quorum. The policy now also opens the
+  Sentinel port (26380 with TLS).
+- In the Sentinel topology the `<name>-pdb` PodDisruptionBudget also counted
+  the Sentinel pods, so it expected 6 pods for 3 data pods. A `minAvailable` or
+  percentage from `spec.podDisruptionBudget` applied to both workloads at once,
+  and a drain could not evict a Sentinel pod while a data pod was down.
+  `<name>-pdb` now covers only the data pods, and the Sentinel pods get their
+  own `<name>-sentinel-pdb` with `maxUnavailable: 1`. Upgrading changes only the
+  NetworkPolicy and the budgets, so no pod restarts.
 
 ## [0.10.0]
 

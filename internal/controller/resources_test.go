@@ -6,6 +6,8 @@ package controller
 
 import (
 	"context"
+	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,9 +18,12 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
+	policyv1 "k8s.io/api/policy/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
@@ -1927,4 +1932,52 @@ func TestServicesTargetNamedPorts(t *testing.T) {
 		t.Fatalf("get sentinel Service: %v", err)
 	}
 	check("sentinel", svc.Spec.Ports, sentinel, data)
+}
+
+// In the Sentinel topology the data pods and the Sentinel pods carry the same
+// labels, so each pod must still land in exactly one budget, and the
+// NetworkPolicy (which then covers the Sentinel pods too) must open their port.
+func TestSentinelPDBsAndNetworkPolicy(t *testing.T) {
+	vc := &cachev1beta1.ValkeyCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "s", Namespace: "ns"},
+		Spec: cachev1beta1.ValkeyClusterSpec{
+			Topology: cachev1beta1.TopologySentinel, Replicas: 3,
+			Sentinel: &cachev1beta1.SentinelSpec{Replicas: 3, Quorum: 2},
+		},
+	}
+	data, sentinel := buildPDB(vc), buildSentinelPDB(vc)
+	check := func(tmpl map[string]string, pod string, want *policyv1.PodDisruptionBudget) {
+		t.Helper()
+		set := labels.Set{appsv1.StatefulSetPodNameLabel: pod}
+		maps.Copy(set, tmpl)
+		for _, pdb := range []*policyv1.PodDisruptionBudget{data, sentinel} {
+			sel, err := metav1.LabelSelectorAsSelector(pdb.Spec.Selector)
+			if err != nil {
+				t.Fatalf("PDB %s selector: %v", pdb.Name, err)
+			}
+			if got := sel.Matches(set); got != (pdb == want) {
+				t.Errorf("PDB %s matches pod %s = %v, want %v", pdb.Name, pod, got, pdb == want)
+			}
+		}
+	}
+	for i := range 3 {
+		check(buildStatefulSet(vc, "h", false).Spec.Template.Labels, fmt.Sprintf("s-%d", i), data)
+		check(buildSentinelStatefulSet(vc, false).Spec.Template.Labels, fmt.Sprintf("s-sentinel-%d", i), sentinel)
+	}
+
+	opens := func(np *networkingv1.NetworkPolicy, port int32) bool {
+		for _, p := range np.Spec.Ingress[0].Ports {
+			if p.Port.IntValue() == int(port) {
+				return true
+			}
+		}
+		return false
+	}
+	if !opens(buildNetworkPolicy(vc), sentinelPort) {
+		t.Errorf("Sentinel NetworkPolicy does not open %d", sentinelPort)
+	}
+	vc.Spec.TLS = &cachev1beta1.TLSSpec{Enabled: true}
+	if !opens(buildNetworkPolicy(vc), sentinelTLSPort) {
+		t.Errorf("Sentinel NetworkPolicy with TLS does not open %d", sentinelTLSPort)
+	}
 }

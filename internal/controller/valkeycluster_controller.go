@@ -275,8 +275,12 @@ func (r *ValkeyClusterReconciler) reconcileReplication(ctx context.Context, vc *
 }
 
 func (r *ValkeyClusterReconciler) ensurePDB(ctx context.Context, vc *cachev1beta1.ValkeyCluster) error {
-	name := vc.Name + "-pdb"
-	key := types.NamespacedName{Namespace: vc.Namespace, Name: name}
+	return r.applyPDB(ctx, vc, buildPDB(vc))
+}
+
+// applyPDB creates or updates desired, or deletes it when PDBs are disabled.
+func (r *ValkeyClusterReconciler) applyPDB(ctx context.Context, vc *cachev1beta1.ValkeyCluster, desired *policyv1.PodDisruptionBudget) error {
+	key := client.ObjectKeyFromObject(desired)
 	if !pdbEnabled(vc) {
 		var existing policyv1.PodDisruptionBudget
 		if err := r.Get(ctx, key, &existing); err == nil {
@@ -284,7 +288,6 @@ func (r *ValkeyClusterReconciler) ensurePDB(ctx context.Context, vc *cachev1beta
 		}
 		return nil
 	}
-	desired := buildPDB(vc)
 	if err := controllerutil.SetControllerReference(vc, desired, r.Scheme); err != nil {
 		return err
 	}
