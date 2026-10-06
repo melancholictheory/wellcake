@@ -23,7 +23,7 @@ func TestBuildCliExecArgsReplicationWithAuth(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "web-cache", Namespace: "web"},
 		Spec: cachev1beta1.ValkeyClusterSpec{
 			Topology: cachev1beta1.TopologyReplication,
-			Auth:     &cachev1beta1.AuthSpec{Enabled: true},
+			Auth:     &cachev1beta1.AuthSpec{Enabled: ptr.To(true)},
 		},
 	}
 	argv := buildCliExecArgs(vc, "web", "web-cache-0", "s3cr3t", []string{"INFO", "replication"})

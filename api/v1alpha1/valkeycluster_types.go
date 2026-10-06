@@ -124,7 +124,7 @@ type ValkeyClusterSpec struct {
 	// deliberate manual step.
 	// +kubebuilder:default=true
 	// +optional
-	AutoReshard bool `json:"autoReshard,omitempty"`
+	AutoReshard *bool `json:"autoReshard,omitempty"`
 
 	// Sentinel-specific settings (only used when Topology=Sentinel).
 	// +optional
@@ -352,7 +352,7 @@ type BackupSpec struct {
 	// +kubebuilder:default=7
 	// +kubebuilder:validation:Minimum=0
 	// +optional
-	Retention int32 `json:"retention,omitempty"`
+	Retention *int32 `json:"retention,omitempty"`
 }
 
 // S3Spec points at an S3 (or S3-compatible, e.g. MinIO/Ceph) bucket.
@@ -401,7 +401,8 @@ type S3Spec struct {
 type PDBSpec struct {
 	// Enabled toggles the PDB. Defaults to true.
 	// +kubebuilder:default=true
-	Enabled bool `json:"enabled,omitempty"`
+	// +optional
+	Enabled *bool `json:"enabled,omitempty"`
 
 	// MaxUnavailable, mutually exclusive with MinAvailable. Default "1".
 	// +optional
@@ -450,7 +451,8 @@ type StorageSpec struct {
 type AuthSpec struct {
 	// Enabled toggles requirepass.
 	// +kubebuilder:default=true
-	Enabled bool `json:"enabled,omitempty"`
+	// +optional
+	Enabled *bool `json:"enabled,omitempty"`
 
 	// ExistingSecret holds the password. If empty, the operator generates one.
 	// The secret must contain key "password".

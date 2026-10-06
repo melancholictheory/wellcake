@@ -39,7 +39,7 @@ import (
 //
 // Returns rotated=true when it just performed a rotation (caller requeues).
 func (r *ValkeyClusterReconciler) reconcilePasswordRotation(ctx context.Context, vc *cachev1beta1.ValkeyCluster) (bool, error) {
-	if vc.Spec.Auth == nil || !vc.Spec.Auth.Enabled {
+	if !vc.Spec.AuthEnabled() {
 		return false, nil
 	}
 	// User-managed Secret: the operator cannot recover the old password, so an

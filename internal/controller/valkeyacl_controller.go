@@ -255,7 +255,7 @@ func applyACLUser(ctx context.Context, c *replClient, u cachev1beta1.ValkeyACLUs
 }
 
 func (r *ValkeyACLReconciler) lookupClusterPassword(ctx context.Context, vc *cachev1beta1.ValkeyCluster) (string, error) {
-	if vc.Spec.Auth == nil || !vc.Spec.Auth.Enabled {
+	if !vc.Spec.AuthEnabled() {
 		return "", nil
 	}
 	name := passwordSecretName(vc)

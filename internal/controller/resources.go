@@ -969,7 +969,7 @@ func buildStatefulSet(vc *cachev1beta1.ValkeyCluster, configHash string, proacti
 		})
 	}
 	configInitEnv := append([]corev1.EnvVar(nil), envVars...)
-	if vc.Spec.Auth != nil && vc.Spec.Auth.Enabled {
+	if vc.Spec.AuthEnabled() {
 		configInitEnv = append(configInitEnv, corev1.EnvVar{
 			Name:      envValkeyPassword,
 			ValueFrom: secretRef(authSecretName(vc), secretKeyPassword),
@@ -1198,7 +1198,7 @@ func pdbEnabled(vc *cachev1beta1.ValkeyCluster) bool {
 	if vc.Spec.PodDisruptionBudget == nil {
 		return vc.Spec.Replicas > 1
 	}
-	return vc.Spec.PodDisruptionBudget.Enabled
+	return ptr.Deref(vc.Spec.PodDisruptionBudget.Enabled, true)
 }
 
 func buildNetworkPolicy(vc *cachev1beta1.ValkeyCluster) *networkingv1.NetworkPolicy {
@@ -1381,7 +1381,7 @@ func buildExporter(vc *cachev1beta1.ValkeyCluster) corev1.Container {
 		// disappears — silently breaking all data-plane alerts on TLS clusters.
 		env = append(env, corev1.EnvVar{Name: "REDIS_EXPORTER_SKIP_TLS_VERIFICATION", Value: valueTrue})
 	}
-	if vc.Spec.Auth != nil && vc.Spec.Auth.Enabled {
+	if vc.Spec.AuthEnabled() {
 		// Honor a user-supplied auth Secret: when auth.existingSecret is set the
 		// operator never creates <name>-auth, so referencing it here leaves the
 		// exporter container unable to start ("secret not found") — and since

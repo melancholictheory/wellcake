@@ -175,7 +175,7 @@ func buildShardScaleUpScript(vc *cachev1beta1.ValkeyCluster, port int32, tlsArgs
 				rep, pwArg, tlsArgs, rep, port, master)
 		}
 	}
-	if vc.Spec.AutoReshard {
+	if vc.Spec.AutoReshardEnabled() {
 		b.WriteString(asmDetectSnippet(pwArg, tlsArgs, existingHost, port))
 		fmt.Fprintf(&b, "want_masters=%d\n", shardCountOf(vc))
 		fmt.Fprintf(&b,

@@ -86,7 +86,7 @@ func buildBackupCronJob(vc *cachev1beta1.ValkeyCluster, name string) *batchv1.Cr
 		tlsArgs = fmt.Sprintf(" --tls --cert %s/tls.crt --key %s/tls.key --cacert %s/ca.crt --insecure", tlsMountPath, tlsMountPath, tlsMountPath)
 	}
 	pwArg := ""
-	if vc.Spec.Auth != nil && vc.Spec.Auth.Enabled {
+	if vc.Spec.AuthEnabled() {
 		pwArg = noAuthWarningArgs
 	}
 
@@ -193,11 +193,11 @@ valkey-check-rdb /backup/dump.rdb
 	// and delete everything except the last N. N=0 disables the cleanup.
 	// For Cluster topology each snapshot produces `shards` files, so we
 	// multiply N by shards to keep the last N snapshots, not the last N files.
-	retainFiles := vc.Spec.Backup.Retention
+	retainFiles := vc.Spec.Backup.RetentionCount()
 	if retainFiles > 0 && vc.Spec.Topology == cachev1beta1.TopologyCluster && vc.Spec.Shards != nil {
 		// Each Cluster snapshot is `shards` RDBs + 1 manifest.txt, so keep
 		// retention*(shards+1) files to retain whole snapshots together.
-		retainFiles = vc.Spec.Backup.Retention * (*vc.Spec.Shards + 1)
+		retainFiles = vc.Spec.Backup.RetentionCount() * (*vc.Spec.Shards + 1)
 	}
 	retentionBlock := ""
 	if retainFiles > 0 {
@@ -242,7 +242,7 @@ echo "ok"
 	}
 
 	env := []corev1.EnvVar{}
-	if vc.Spec.Auth != nil && vc.Spec.Auth.Enabled {
+	if vc.Spec.AuthEnabled() {
 		secretName := passwordSecretName(vc)
 		if vc.Spec.Auth.ExistingSecret != "" {
 			secretName = vc.Spec.Auth.ExistingSecret

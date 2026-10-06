@@ -78,7 +78,7 @@ func (v *ValkeyClusterCustomValidator) ValidateDelete(_ context.Context, _ *cach
 // existence loop stays simple and the validator's cyclomatic complexity in check.
 func referencedSecrets(vc *cachev1beta1.ValkeyCluster) map[string]string {
 	checks := map[string]string{}
-	if vc.Spec.Auth != nil && vc.Spec.Auth.Enabled && vc.Spec.Auth.ExistingSecret != "" {
+	if vc.Spec.AuthEnabled() && vc.Spec.Auth.ExistingSecret != "" {
 		checks[vc.Spec.Auth.ExistingSecret] = "spec.auth.existingSecret"
 	}
 	if vc.Spec.TLS != nil && vc.Spec.TLS.Enabled && vc.Spec.TLS.ExistingSecret != "" {

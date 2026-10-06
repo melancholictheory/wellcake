@@ -45,6 +45,23 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `<name>-pdb` now covers only the data pods, and the Sentinel pods get their
   own `<name>-sentinel-pdb` with `maxUnavailable: 1`. Upgrading changes only the
   NetworkPolicy and the budgets, so no pod restarts.
+- An explicit `false` or `0` on `spec.auth.enabled`,
+  `spec.podDisruptionBudget.enabled`, `spec.autoReshard` and
+  `spec.backup.retention` is no longer reset to its CRD default. The operator
+  rewrote the whole object when adding its finalizer, and these fields were
+  dropped on serialization, so the API server re-applied the default: auth got
+  enabled, a PDB got created, automatic resharding got turned on, and backup
+  retention went from "keep every snapshot" to 7, deleting older snapshots. The
+  fields now keep an explicit value through the Go types (see Changed).
+
+### Changed
+
+- Go API: `AuthSpec.Enabled`, `PDBSpec.Enabled` and `ValkeyClusterSpec.AutoReshard`
+  are now `*bool`, and `BackupSpec.Retention` is `*int32` (v1beta1 and
+  v1alpha1), so an explicit false/0 is told apart from "unset". Use
+  `ValkeyClusterSpec.AuthEnabled()`, `ValkeyClusterSpec.AutoReshardEnabled()`
+  and `BackupSpec.RetentionCount()` to read them with their default. The CRD
+  schema and YAML manifests are unchanged.
 
 ## [0.10.0]
 

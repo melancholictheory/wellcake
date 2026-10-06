@@ -566,7 +566,7 @@ func buildScaleUpJob(vc *cachev1beta1.ValkeyCluster, password, name string) *bat
 	// XR converges to Ready but the cluster never actually reshards). So loop:
 	// rebalance, then check cluster_size (== masters that own slots); once it
 	// reaches the desired shard count every new master has slots and we stop.
-	if vc.Spec.AutoReshard {
+	if vc.Spec.AutoReshardEnabled() {
 		wantMasters := *vc.Spec.Shards
 		sb.WriteString(asmDetectSnippet(pwArg, tlsArgs, existingHost, port))
 		fmt.Fprintf(&sb, "want_masters=%d\n", wantMasters)
@@ -782,7 +782,7 @@ done
 	// but lopsided. Rebalance spreads those slots back out evenly across the
 	// surviving masters so the post-scale-down state is balanced — i.e. the
 	// cluster converges without a manual follow-up reshard.
-	if vc.Spec.AutoReshard {
+	if vc.Spec.AutoReshardEnabled() {
 		script += fmt.Sprintf("echo 'rebalancing surviving masters'\nvalkey-cli%s%s --cluster rebalance %s$ASM_FLAG --cluster-yes\n",
 			pwArg, tlsArgs, existing)
 	}

@@ -353,7 +353,7 @@ func (r *ValkeyClusterReconciler) ensureNetworkPolicy(ctx context.Context, vc *c
 }
 
 func (r *ValkeyClusterReconciler) ensurePasswordSecret(ctx context.Context, vc *cachev1beta1.ValkeyCluster) (string, error) {
-	if vc.Spec.Auth == nil || !vc.Spec.Auth.Enabled {
+	if !vc.Spec.AuthEnabled() {
 		return "", nil
 	}
 	if vc.Spec.Auth.ExistingSecret != "" {
@@ -906,7 +906,7 @@ func (r *ValkeyClusterReconciler) mapSecretToCluster(ctx context.Context, obj cl
 	for i := range list.Items {
 		vc := &list.Items[i]
 		tlsMatch := tlsEnabled(vc) && tlsSecretName(vc) == name
-		authMatch := vc.Spec.Auth != nil && vc.Spec.Auth.Enabled &&
+		authMatch := vc.Spec.AuthEnabled() &&
 			vc.Spec.Auth.ExistingSecret != "" && vc.Spec.Auth.ExistingSecret == name
 		if tlsMatch || authMatch {
 			reqs = append(reqs, reconcile.Request{

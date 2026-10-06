@@ -18,6 +18,7 @@ package controller
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
@@ -215,7 +217,7 @@ var _ = Describe("ValkeyCluster reconcile (envtest)", func() {
 				Topology: cachev1beta1.TopologyReplication,
 				Profile:  cachev1beta1.ProfileCache,
 				Replicas: 3,
-				Auth:     &cachev1beta1.AuthSpec{Enabled: true},
+				Auth:     &cachev1beta1.AuthSpec{Enabled: ptr.To(true)},
 			},
 		}
 		Expect(k8sClient.Create(ctx, vc)).To(Succeed())
@@ -309,7 +311,7 @@ var _ = Describe("ValkeyCluster reconcile (envtest)", func() {
 			Spec: cachev1beta1.ValkeyClusterSpec{
 				Topology: cachev1beta1.TopologyReplication,
 				Replicas: 3,
-				Auth:     &cachev1beta1.AuthSpec{Enabled: true},
+				Auth:     &cachev1beta1.AuthSpec{Enabled: ptr.To(true)},
 				TLS:      &cachev1beta1.TLSSpec{Enabled: true, ExistingSecret: tlsSecret},
 			},
 		}
@@ -493,5 +495,155 @@ var _ = Describe("ValkeyCluster racing reconciles (chaos C-7)", func() {
 		}
 		// Status converged to the final spec generation — nothing stuck.
 		Expect(final.Status.ObservedGeneration).To(Equal(final.Generation))
+	})
+})
+
+// Zero values that differ from their CRD default (auth.enabled=false,
+// podDisruptionBudget.enabled=false, autoReshard=false, backup.retention=0) must
+// survive the operator's own writes to the object. They used to be tagged
+// omitempty, so re-serializing the typed object (finalizer add/remove) dropped
+// them and the API server re-applied the default: auth got enabled, a PDB got
+// created, and backup retention silently went from "keep forever" to 7.
+var _ = Describe("Zero-value fields that have a CRD default (envtest)", func() {
+	const ns = "default"
+
+	gvk := cachev1beta1.GroupVersion.WithKind("ValkeyCluster")
+
+	// newRaw builds the object as a GitOps tool or kubectl would send it: plain
+	// JSON with the explicit false/0, not via the typed client (whose own
+	// serialization is what is under test).
+	newRaw := func(name string) *unstructured.Unstructured {
+		u := &unstructured.Unstructured{Object: map[string]any{
+			"metadata": map[string]any{"name": name, "namespace": ns},
+			"spec": map[string]any{
+				"topology":            "Replication",
+				"replicas":            int64(3),
+				"autoReshard":         false,
+				"auth":                map[string]any{"enabled": false},
+				"podDisruptionBudget": map[string]any{"enabled": false},
+				"backup": map[string]any{
+					"enabled":   false,
+					"retention": int64(0),
+					"s3":        map[string]any{"bucket": "b", "credentialsSecret": "s3creds"},
+				},
+			},
+		}}
+		u.SetGroupVersionKind(gvk)
+		return u
+	}
+
+	expectZeroValuesKept := func(key types.NamespacedName, when string) {
+		GinkgoHelper()
+		u := &unstructured.Unstructured{}
+		u.SetGroupVersionKind(gvk)
+		Expect(k8sClient.Get(ctx, key, u)).To(Succeed())
+		var lost []string
+		for _, path := range [][]string{
+			{"spec", "autoReshard"},
+			{"spec", "auth", "enabled"},
+			{"spec", "podDisruptionBudget", "enabled"},
+		} {
+			if v, found, err := unstructured.NestedBool(u.Object, path...); err != nil || !found || v {
+				lost = append(lost, fmt.Sprintf("%s=%v (found=%v)", strings.Join(path, "."), v, found))
+			}
+		}
+		if v, found, err := unstructured.NestedInt64(u.Object, "spec", "backup", "retention"); err != nil || !found || v != 0 {
+			lost = append(lost, fmt.Sprintf("spec.backup.retention=%d (found=%v)", v, found))
+		}
+		Expect(lost).To(BeEmpty(), "zero values lost %s", when)
+	}
+
+	It("keeps explicit false/0 through the finalizer add and acts on them", func() {
+		u := newRaw("zero-values")
+		Expect(k8sClient.Create(ctx, u)).To(Succeed())
+		key := client.ObjectKeyFromObject(u)
+		r := &ValkeyClusterReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+		DeferCleanup(func() {
+			var vc cachev1beta1.ValkeyCluster
+			if k8sClient.Get(ctx, key, &vc) == nil {
+				deleteAndFinalize(r, &vc)
+			}
+		})
+
+		expectZeroValuesKept(key, "right after create")
+
+		reconcileToStable(r, key)
+
+		var vc cachev1beta1.ValkeyCluster
+		Expect(k8sClient.Get(ctx, key, &vc)).To(Succeed())
+		Expect(controllerutil.ContainsFinalizer(&vc, finalizerName)).To(BeTrue())
+		expectZeroValuesKept(key, "after the finalizer was added")
+
+		By("not creating what the disabled features would create")
+		Expect(apierrors.IsNotFound(k8sClient.Get(ctx,
+			types.NamespacedName{Name: key.Name + "-auth", Namespace: ns}, &corev1.Secret{}))).
+			To(BeTrue(), "auth.enabled=false must not generate a password Secret")
+		Expect(apierrors.IsNotFound(k8sClient.Get(ctx,
+			types.NamespacedName{Name: key.Name + "-pdb", Namespace: ns}, &policyv1.PodDisruptionBudget{}))).
+			To(BeTrue(), "podDisruptionBudget.enabled=false must not create a PDB")
+		var sts appsv1.StatefulSet
+		Expect(k8sClient.Get(ctx, key, &sts)).To(Succeed())
+		for _, c := range sts.Spec.Template.Spec.Containers {
+			for _, e := range c.Env {
+				Expect(e.ValueFrom == nil || e.ValueFrom.SecretKeyRef == nil ||
+					e.ValueFrom.SecretKeyRef.Name != key.Name+"-auth").To(BeTrue(),
+					"container %s reads the auth Secret although auth is disabled", c.Name)
+			}
+		}
+	})
+
+	It("defaults unset fields and keeps explicit ones when created through the typed client", func() {
+		s3 := &cachev1beta1.S3Spec{Bucket: "b", CredentialsSecret: "s3creds"}
+		unset := &cachev1beta1.ValkeyCluster{
+			ObjectMeta: metav1.ObjectMeta{Name: "typed-unset", Namespace: ns},
+			Spec: cachev1beta1.ValkeyClusterSpec{
+				Topology:            cachev1beta1.TopologyReplication,
+				Replicas:            3,
+				Auth:                &cachev1beta1.AuthSpec{ExistingSecret: "x"},
+				PodDisruptionBudget: &cachev1beta1.PDBSpec{},
+				Backup:              &cachev1beta1.BackupSpec{S3: s3},
+			},
+		}
+		explicit := unset.DeepCopy()
+		explicit.Name = "typed-explicit"
+		explicit.Spec.AutoReshard = ptr.To(false)
+		explicit.Spec.Auth.Enabled = ptr.To(false)
+		explicit.Spec.PodDisruptionBudget.Enabled = ptr.To(false)
+		explicit.Spec.Backup.Retention = ptr.To[int32](0)
+		for _, vc := range []*cachev1beta1.ValkeyCluster{unset, explicit} {
+			Expect(k8sClient.Create(ctx, vc)).To(Succeed())
+			DeferCleanup(func() { _ = k8sClient.Delete(ctx, vc) })
+		}
+
+		var got cachev1beta1.ValkeyCluster
+		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(unset), &got)).To(Succeed())
+		Expect(got.Spec.AutoReshard).To(HaveValue(BeTrue()), "unset autoReshard gets the CRD default")
+		Expect(got.Spec.Auth.Enabled).To(HaveValue(BeTrue()), "unset auth.enabled gets the CRD default")
+		Expect(got.Spec.PodDisruptionBudget.Enabled).To(HaveValue(BeTrue()), "unset podDisruptionBudget.enabled gets the CRD default")
+		Expect(got.Spec.Backup.Retention).To(HaveValue(BeEquivalentTo(7)), "unset backup.retention gets the CRD default")
+
+		expectZeroValuesKept(client.ObjectKeyFromObject(explicit), "on a typed create")
+	})
+
+	It("keeps explicit false/0 on an object updated through the typed client", func() {
+		u := newRaw("zero-values-update")
+		Expect(k8sClient.Create(ctx, u)).To(Succeed())
+		key := client.ObjectKeyFromObject(u)
+		r := &ValkeyClusterReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+		DeferCleanup(func() {
+			var vc cachev1beta1.ValkeyCluster
+			if k8sClient.Get(ctx, key, &vc) == nil {
+				deleteAndFinalize(r, &vc)
+			}
+		})
+		reconcileToStable(r, key)
+
+		// Any typed read-modify-write (the operator, a plugin, a script built on
+		// the API types) re-serializes the whole spec.
+		var vc cachev1beta1.ValkeyCluster
+		Expect(k8sClient.Get(ctx, key, &vc)).To(Succeed())
+		vc.Spec.Replicas = 2
+		Expect(k8sClient.Update(ctx, &vc)).To(Succeed())
+		expectZeroValuesKept(key, "after a typed Update")
 	})
 })

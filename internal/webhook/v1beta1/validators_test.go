@@ -65,21 +65,21 @@ func TestValkeyClusterValidator(t *testing.T) {
 		{
 			name: "auth existingSecret missing -> error",
 			mutate: func(vc *cachev1beta1.ValkeyCluster) {
-				vc.Spec.Auth = &cachev1beta1.AuthSpec{Enabled: true, ExistingSecret: "absent"}
+				vc.Spec.Auth = &cachev1beta1.AuthSpec{Enabled: ptr.To(true), ExistingSecret: "absent"}
 			},
 			wantErr: true,
 		},
 		{
 			name: "auth existingSecret present -> ok",
 			mutate: func(vc *cachev1beta1.ValkeyCluster) {
-				vc.Spec.Auth = &cachev1beta1.AuthSpec{Enabled: true, ExistingSecret: "present"}
+				vc.Spec.Auth = &cachev1beta1.AuthSpec{Enabled: ptr.To(true), ExistingSecret: "present"}
 			},
 			objs: []client.Object{present},
 		},
 		{
 			name: "auth disabled does not require the Secret",
 			mutate: func(vc *cachev1beta1.ValkeyCluster) {
-				vc.Spec.Auth = &cachev1beta1.AuthSpec{Enabled: false, ExistingSecret: "absent"}
+				vc.Spec.Auth = &cachev1beta1.AuthSpec{Enabled: ptr.To(false), ExistingSecret: "absent"}
 			},
 		},
 		{

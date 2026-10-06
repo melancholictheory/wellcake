@@ -95,7 +95,7 @@ func tlsOn(vc *cachev1beta1.ValkeyCluster) bool {
 }
 
 func authOn(vc *cachev1beta1.ValkeyCluster) bool {
-	return vc.Spec.Auth != nil && vc.Spec.Auth.Enabled
+	return vc.Spec.AuthEnabled()
 }
 
 // tlsSecretNameFor returns the Secret holding the cluster's TLS material.
