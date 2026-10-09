@@ -8,6 +8,29 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- In the Sentinel topology the data pods ignored the current primary when they
+  started (#64): pod-0 always came up as a primary and the others replicated from
+  pod-0. After a failover that left a re-created replica chained behind pod-0,
+  out of Sentinel's sight, and a re-created pod-0 serving writes as a primary
+  from the RDB of its last resync until Sentinel demoted it. The init container
+  now asks the Sentinels for the primary (highest config epoch) and replicates
+  from it, or starts as the primary when the Sentinels name this pod. An answer
+  that is neither this pod nor a reachable primary, such as a primary that is
+  restarting, is retried for up to 90 s while the Sentinels fail over, and pod-0
+  is the fallback when no Sentinel answers. With persistence off, a pod that
+  starts as a replica drops its `dump.rdb`.
+- In the Sentinel topology the data pods announced no address, so the primary
+  reported its replicas by pod IP and Sentinel tracked them by IP (#63). Every
+  re-created pod left a dead entry behind and was not reconfigured under its
+  new IP, which could leave a re-created pod-0 as a second primary for good.
+  The data pods now announce their DNS name (`replica-announce-ip`), and a
+  primary the Sentinels still report by IP is followed by its pod's name.
+- Upgrading changes the Sentinel topology's data pods, so they restart once,
+  one at a time, with a failover when the primary restarts. Entries that
+  Sentinel recorded by IP before the upgrade stay as `s_down` until
+  `SENTINEL RESET mymaster` is run on each Sentinel, one at a time, and a
+  replica can stay chained behind another one until the next failover or its
+  next restart.
 - Turning auth off on an existing ValkeyCluster (`spec.auth.enabled` set to
   `false`) now removes the password from the data pods. The init container only
   seeded and re-keyed the operator-managed ACL users (`default`, `replicator`,
