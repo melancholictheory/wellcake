@@ -7,6 +7,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -53,7 +54,27 @@ const (
 	// and ACKs, and PING for keepalive. The stream itself is not ACL-checked per
 	// key, so no key glob is granted.
 	replicationACLCommands = "+psync +replconf +ping"
+
+	// Sentinel timings applied when spec.sentinel leaves them at zero.
+	defaultSentinelDownAfterMs     int32 = 5000
+	defaultSentinelFailoverTimeout int32 = 60000
 )
+
+// sentinelDownAfterMs returns the configured down-after-milliseconds, or the default.
+func sentinelDownAfterMs(vc *cachev1beta1.ValkeyCluster) int32 {
+	if v := vc.Spec.Sentinel.DownAfterMilliseconds; v > 0 {
+		return v
+	}
+	return defaultSentinelDownAfterMs
+}
+
+// sentinelFailoverTimeout returns the configured failover-timeout, or the default.
+func sentinelFailoverTimeout(vc *cachev1beta1.ValkeyCluster) int32 {
+	if v := vc.Spec.Sentinel.FailoverTimeout; v > 0 {
+		return v
+	}
+	return defaultSentinelFailoverTimeout
+}
 
 // reconcileSentinel brings up Replication primitives plus a separate
 // StatefulSet of Sentinel pods that monitor the primary and elect a new one
@@ -109,6 +130,9 @@ func (r *ValkeyClusterReconciler) reconcileSentinel(ctx context.Context, vc *cac
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("sentinel statefulset: %w", err)
 	}
+	// Sentinel topology has no periodic requeue, so retry until every Sentinel
+	// runs the configured timings.
+	timingsPending := r.applySentinelTimings(ctx, vc, password)
 
 	if err := r.ensureBackupCronJob(ctx, vc); err != nil {
 		return ctrl.Result{}, fmt.Errorf("backup cronjob: %w", err)
@@ -163,7 +187,11 @@ func (r *ValkeyClusterReconciler) reconcileSentinel(ctx context.Context, vc *cac
 		ObservedGeneration: vc.Generation,
 		LastTransitionTime: metav1.Now(),
 	})
-	return ctrl.Result{}, r.Status().Patch(ctx, vc, patch)
+	var res ctrl.Result
+	if timingsPending {
+		res.RequeueAfter = 30 * time.Second
+	}
+	return res, r.Status().Patch(ctx, vc, patch)
 }
 
 // renderSentinelConf assembles the sentinel.conf served via ConfigMap. The
@@ -183,12 +211,13 @@ func renderSentinelConf(vc *cachev1beta1.ValkeyCluster, password string) string 
 	conf := fmt.Sprintf(`port %d
 dir %s
 sentinel monitor %s %s %d %d
-sentinel down-after-milliseconds %s 5000
-sentinel failover-timeout %s 60000
+sentinel down-after-milliseconds %s %d
+sentinel failover-timeout %s %d
 sentinel parallel-syncs %s 1
 sentinel resolve-hostnames yes
 sentinel announce-hostnames yes
-`, sentinelPort, dataMountPath, sentinelMasterName, primary, port, quorum, sentinelMasterName, sentinelMasterName, sentinelMasterName)
+`, sentinelPort, dataMountPath, sentinelMasterName, primary, port, quorum,
+		sentinelMasterName, sentinelDownAfterMs(vc), sentinelMasterName, sentinelFailoverTimeout(vc), sentinelMasterName)
 
 	if password != "" {
 		// Authenticate to the monitored master as the dedicated least-data-exposure
@@ -401,6 +430,109 @@ func buildSentinelStatefulSet(vc *cachev1beta1.ValkeyCluster, proactive bool) *a
 			VolumeClaimTemplates: []corev1.PersistentVolumeClaim{pvc},
 		},
 	}
+}
+
+// sentinelTimings returns the SENTINEL SET options the operator keeps in sync on
+// running Sentinels, in a stable order.
+func sentinelTimings(vc *cachev1beta1.ValkeyCluster) [][2]string {
+	return [][2]string{
+		{"down-after-milliseconds", strconv.Itoa(int(sentinelDownAfterMs(vc)))},
+		{"failover-timeout", strconv.Itoa(int(sentinelFailoverTimeout(vc)))},
+	}
+}
+
+// applySentinelTimings pushes the configured timings to every running Sentinel.
+// The ConfigMap only seeds a Sentinel when its pod starts, so without this a
+// change would wait for the next restart. It returns true when a Sentinel could
+// not be checked, so the caller requeues until every Sentinel is in sync.
+func (r *ValkeyClusterReconciler) applySentinelTimings(ctx context.Context, vc *cachev1beta1.ValkeyCluster, password string) bool {
+	log := logf.FromContext(ctx)
+	port := sentinelPort
+	if tlsEnabled(vc) {
+		port = sentinelPort + 1 // renderSentinelConf moves Sentinel to tls-port = sentinelPort+1
+	}
+	want := sentinelTimings(vc)
+	cert := loadMTLSClientCert(ctx, r, vc)
+	pending := false
+	for i := int32(0); i < vc.Spec.Sentinel.Replicas; i++ {
+		host := sentinelPodFQDN(vc, i)
+		c := dialReplClient(ctx, host, port, password, tlsEnabled(vc), cert, 3*time.Second)
+		if c == nil {
+			pending = true
+			continue
+		}
+		changed, err := syncSentinelTimings(ctx, c, want)
+		c.close()
+		if err != nil {
+			log.Error(err, "Could not apply Sentinel timings", "pod", host)
+			pending = true
+			continue
+		}
+		if changed {
+			log.Info("Applied Sentinel timings", "pod", host,
+				"downAfterMilliseconds", sentinelDownAfterMs(vc), "failoverTimeout", sentinelFailoverTimeout(vc))
+		}
+	}
+	return pending
+}
+
+// syncSentinelTimings reads the monitored master's settings from one Sentinel and
+// issues a single SENTINEL SET for the values that differ — only when needed,
+// since every SENTINEL SET makes the Sentinel rewrite its config file. It reports
+// whether anything was written.
+func syncSentinelTimings(ctx context.Context, c *replClient, want [][2]string) (bool, error) {
+	cur, err := c.sentinelMaster(ctx, sentinelMasterName)
+	if err != nil {
+		return false, err
+	}
+	var set []string
+	for _, kv := range want {
+		if cur[kv[0]] != kv[1] {
+			set = append(set, kv[0], kv[1])
+		}
+	}
+	if len(set) == 0 {
+		return false, nil
+	}
+	return true, c.sentinelSet(ctx, sentinelMasterName, set...)
+}
+
+// sentinelMaster returns SENTINEL MASTER <name> as a field → value map.
+func (c *replClient) sentinelMaster(ctx context.Context, name string) (map[string]string, error) {
+	res, err := c.rdb.Do(ctx, "SENTINEL", "MASTER", name).Result()
+	if err != nil {
+		return nil, err
+	}
+	return parseSentinelMaster(res)
+}
+
+// parseSentinelMaster decodes a SENTINEL MASTER reply: a flat field/value array
+// over RESP2, a map over RESP3.
+func parseSentinelMaster(res any) (map[string]string, error) {
+	out := map[string]string{}
+	switch v := res.(type) {
+	case []any:
+		for i := 0; i+1 < len(v); i += 2 {
+			out[fmt.Sprint(v[i])] = fmt.Sprint(v[i+1])
+		}
+	case map[any]any:
+		for k, val := range v {
+			out[fmt.Sprint(k)] = fmt.Sprint(val)
+		}
+	default:
+		return nil, fmt.Errorf("unexpected SENTINEL MASTER reply type %T", res)
+	}
+	return out, nil
+}
+
+// sentinelSet issues SENTINEL SET <name> <option> <value> [<option> <value> ...].
+func (c *replClient) sentinelSet(ctx context.Context, name string, optionValues ...string) error {
+	args := make([]any, 0, 3+len(optionValues))
+	args = append(args, "SENTINEL", "SET", name)
+	for _, s := range optionValues {
+		args = append(args, s)
+	}
+	return c.rdb.Do(ctx, args...).Err()
 }
 
 func sentinelLabels(vc *cachev1beta1.ValkeyCluster) map[string]string {

@@ -29,6 +29,8 @@ Short names: `vk`, `vkc`. Printer columns: `Topology`, `Replicas`,
 | `sentinel.replicas`           | int32 ≥3                   | 3              | Number of Sentinel pods. |
 | `sentinel.quorum`             | int32                      | `replicas/2+1` | Quorum for failover. |
 | `sentinel.image`              | string                     | inherited      | |
+| `sentinel.downAfterMilliseconds` | int32 ≥0                | `5000`         | `sentinel down-after-milliseconds`. `0` → default. Applied to running Sentinels with `SENTINEL SET`, no restart. |
+| `sentinel.failoverTimeout`    | int32 ≥0 (ms)              | `60000`        | `sentinel failover-timeout`. `0` → default. Applied to running Sentinels with `SENTINEL SET`, no restart. |
 | `resources`                   | k8s ResourceRequirements   | —              | Applied to the Valkey container. `maxmemory` is automatically set to 60% of `limits.memory` unless overridden in `spec.config.maxmemory`. |
 | `storage`                     | `StorageSpec`              | —              | |
 | `storage.size`                | resource.Quantity          | `10Gi`         | **Expand-only** (CEL). The Cache profile defaults to 1Gi. |

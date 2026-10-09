@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims to
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `spec.sentinel.downAfterMilliseconds` and `spec.sentinel.failoverTimeout` on
+  `ValkeyCluster` (v1beta1 and v1alpha1) to tune Sentinel failure detection and
+  failover, which were hard-coded to 5000 and 60000 ms. A change is pushed to
+  the running Sentinels with `SENTINEL SET` (only when a value differs), so it
+  takes effect without restarting them; the Sentinel ConfigMap carries the same
+  values for pods that start later. Left unset, the defaults are unchanged. The
+  `valkey-cluster` chart exposes them under `sentinel`.
+
 ## [0.11.0]
 
 ### Fixed
