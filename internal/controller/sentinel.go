@@ -25,10 +25,12 @@ import (
 )
 
 const (
-	sentinelPort       int32 = 26379
-	sentinelTLSPort    int32 = 26380
-	sentinelMasterName       = "mymaster"
-	sentinelConfigName       = "sentinel.conf"
+	sentinelPort    int32 = 26379
+	sentinelTLSPort int32 = 26380
+	// sentinelPlaneLabel marks the Sentinel pods (value "sentinel"); see sentinelPodLabels.
+	sentinelPlaneLabel = "valkey.wellcake.io/plane"
+	sentinelMasterName = "mymaster"
+	sentinelConfigName = "sentinel.conf"
 	// sentinelACLUser is the dedicated ACL user (seeded on the data nodes by
 	// renderInitScript) that Sentinel authenticates as when reaching the
 	// monitored master — least data exposure vs the default user.
@@ -248,6 +250,18 @@ func (r *ValkeyClusterReconciler) ensureSentinelConfigMap(ctx context.Context, v
 
 func (r *ValkeyClusterReconciler) ensureSentinelService(ctx context.Context, vc *cachev1beta1.ValkeyCluster) error {
 	port := sentinelListenPort(vc)
+	// Select on sentinelPlaneLabel only once every Sentinel pod carries it.
+	// Switching earlier would drop the unlabeled pods from the headless Service
+	// mid-rollout, and with them the DNS names the Sentinels use to reach each
+	// other.
+	selector := sentinelLabels(vc)
+	labeled, err := r.sentinelPodsLabeled(ctx, vc)
+	if err != nil {
+		return err
+	}
+	if labeled {
+		selector = sentinelPodLabels(vc)
+	}
 	svc := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      sentinelStatefulSetName(vc),
@@ -258,7 +272,7 @@ func (r *ValkeyClusterReconciler) ensureSentinelService(ctx context.Context, vc 
 			Type:                     corev1.ServiceTypeClusterIP,
 			ClusterIP:                corev1.ClusterIPNone,
 			PublishNotReadyAddresses: true,
-			Selector:                 sentinelLabels(vc),
+			Selector:                 selector,
 			Ports: []corev1.ServicePort{{
 				Name:       componentSentinel,
 				Port:       port,
@@ -271,6 +285,26 @@ func (r *ValkeyClusterReconciler) ensureSentinelService(ctx context.Context, vc 
 		return err
 	}
 	return r.applyService(ctx, svc)
+}
+
+// sentinelPodsLabeled reports whether every existing Sentinel pod carries
+// sentinelPlaneLabel (true when there are none yet).
+func (r *ValkeyClusterReconciler) sentinelPodsLabeled(ctx context.Context, vc *cachev1beta1.ValkeyCluster) (bool, error) {
+	var list corev1.PodList
+	if err := r.List(ctx, &list, client.InNamespace(vc.Namespace), client.MatchingLabels(sentinelLabels(vc))); err != nil {
+		return false, err
+	}
+	sts := sentinelStatefulSetName(vc)
+	for i := range list.Items {
+		p := &list.Items[i]
+		if _, ok := ordinalFromPodName(p.Name, sts); !ok {
+			continue // a data pod: same labels, different StatefulSet
+		}
+		if p.Labels[sentinelPlaneLabel] != componentSentinel {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 func (r *ValkeyClusterReconciler) ensureSentinelStatefulSet(ctx context.Context, vc *cachev1beta1.ValkeyCluster) (*appsv1.StatefulSet, error) {
@@ -306,10 +340,6 @@ func buildSentinelStatefulSet(vc *cachev1beta1.ValkeyCluster, proactive bool) *a
 		image = vc.Spec.Image
 	}
 	port := sentinelListenPort(vc)
-
-	// Sentinel rewrites its config file in place on failover, so we copy
-	// it from the ConfigMap to /data on each start (the initContainer pattern).
-	initScript := fmt.Sprintf("set -eu\ncp /etc/sentinel/%s %s/runtime-sentinel.conf\n", sentinelConfigName, dataMountPath)
 
 	volumeMounts := []corev1.VolumeMount{
 		{Name: configVolumeName, MountPath: "/etc/sentinel", ReadOnly: true},
@@ -364,16 +394,14 @@ func buildSentinelStatefulSet(vc *cachev1beta1.ValkeyCluster, proactive bool) *a
 			ServiceName:    sentinelStatefulSetName(vc),
 			Selector:       &metav1.LabelSelector{MatchLabels: labels},
 			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{Labels: labels},
+				ObjectMeta: metav1.ObjectMeta{Labels: sentinelPodLabels(vc)},
 				Spec: corev1.PodSpec{
 					InitContainers: []corev1.Container{{
-						Name:    "sentinel-init",
-						Image:   image,
-						Command: []string{shellCmd, "-c", initScript},
-						VolumeMounts: []corev1.VolumeMount{
-							{Name: configVolumeName, MountPath: "/etc/sentinel", ReadOnly: true},
-							{Name: dataVolumeName, MountPath: dataMountPath},
-						},
+						Name:            "sentinel-init",
+						Image:           image,
+						Command:         []string{shellCmd, "-c", renderSentinelInitScript(vc)},
+						Env:             sentinelInitEnv(vc),
+						VolumeMounts:    volumeMounts,
 						SecurityContext: containerSecurityContext(vc),
 					}},
 					Containers: []corev1.Container{{
@@ -407,6 +435,83 @@ func sentinelLabels(vc *cachev1beta1.ValkeyCluster) map[string]string {
 	l := labelsFor(vc)
 	l[componentLabel] = componentSentinel
 	return l
+}
+
+// sentinelPodLabels are the Sentinel pod template labels: sentinelLabels plus
+// sentinelPlaneLabel. The data pods carry the same sentinelLabels, and the
+// StatefulSet selectors (immutable) cannot change, so only this extra label
+// tells the two workloads apart for the headless Sentinel Service.
+func sentinelPodLabels(vc *cachev1beta1.ValkeyCluster) map[string]string {
+	l := sentinelLabels(vc)
+	l[sentinelPlaneLabel] = componentSentinel
+	return l
+}
+
+// sentinelInitEnv gives the init container the password it needs to ask the
+// other Sentinels for the current primary.
+func sentinelInitEnv(vc *cachev1beta1.ValkeyCluster) []corev1.EnvVar {
+	if !vc.Spec.AuthEnabled() {
+		return nil
+	}
+	return []corev1.EnvVar{{Name: envValkeyPassword, ValueFrom: secretRef(authSecretName(vc), secretKeyPassword)}}
+}
+
+// renderSentinelInitScript builds runtime-sentinel.conf from the ConfigMap on
+// every start, so auth, TLS and timing changes always apply. Two things carry
+// over instead:
+//   - the Sentinel's identity (myid, current-epoch) from the previous
+//     runtime-sentinel.conf on the PVC. A new ID on every restart leaves the old
+//     one with the other Sentinels as a dead peer, which counts against the
+//     majority a failover needs.
+//   - the monitored primary, taken from the other Sentinels (the answer with the
+//     highest config-epoch). The ConfigMap only knows pod-0, so without this a
+//     re-created Sentinel reports pod-0 as the primary until hello messages
+//     correct it. With no answer (first bootstrap) the ConfigMap value stands.
+func renderSentinelInitScript(vc *cachev1beta1.ValkeyCluster) string {
+	auth := ""
+	if vc.Spec.AuthEnabled() {
+		auth = noAuthWarningArgs
+	}
+	tlsArgs := ""
+	if tlsEnabled(vc) {
+		tlsArgs = fmt.Sprintf(" --tls --cacert %[1]s/%[2]s --cert %[1]s/%[3]s --key %[1]s/%[4]s",
+			tlsMountPath, secretKeyTLSCACert, secretKeyTLSCert, secretKeyTLSKey)
+	}
+	return fmt.Sprintf(`set -eu
+RT=%[1]s/runtime-sentinel.conf
+NEW="$RT.new"
+cp /etc/sentinel/%[2]s "$NEW"
+if [ -f "$RT" ]; then
+  awk '$1 == "sentinel" && ($2 == "myid" || $2 == "current-epoch")' "$RT" >> "$NEW"
+fi
+STS=%[3]s
+ME="${HOSTNAME##*-}"
+BEST_EPOCH=-1
+BEST_HOST=""
+BEST_PORT=""
+i=0
+while [ "$i" -lt %[4]d ]; do
+  if [ "$i" != "$ME" ]; then
+    OUT=$(timeout 3 valkey-cli -h "$STS-$i.$STS" -p %[5]d%[6]s%[7]s SENTINEL MASTER %[8]s 2>/dev/null || true)
+    set -- $(printf '%%s
+' "$OUT" | awk 'NR %% 2 == 1 { k = $0 } NR %% 2 == 0 { v[k] = $0 } END { if (v["ip"] != "" && v["config-epoch"] ~ /^[0-9]+$/) print v["ip"], v["port"], v["config-epoch"] }')
+    if [ "$#" -eq 3 ] && [ "$3" -gt "$BEST_EPOCH" ]; then
+      BEST_HOST=$1
+      BEST_PORT=$2
+      BEST_EPOCH=$3
+    fi
+  fi
+  i=$((i + 1))
+done
+if [ -n "$BEST_HOST" ]; then
+  echo "monitoring $BEST_HOST:$BEST_PORT (config-epoch $BEST_EPOCH) as reported by the other Sentinels"
+  awk -v h="$BEST_HOST" -v p="$BEST_PORT" '$1 == "sentinel" && $2 == "monitor" && $3 == "%[8]s" { $4 = h; $5 = p } { print }' "$NEW" > "$NEW.m"
+  mv "$NEW.m" "$NEW"
+  echo "sentinel config-epoch %[8]s $BEST_EPOCH" >> "$NEW"
+fi
+mv "$NEW" "$RT"
+`, dataMountPath, sentinelConfigName, sentinelStatefulSetName(vc), vc.Spec.Sentinel.Replicas,
+		sentinelListenPort(vc), tlsArgs, auth, sentinelMasterName)
 }
 
 // sentinelPodNames lists the Sentinel StatefulSet's pod names. Selectors use
