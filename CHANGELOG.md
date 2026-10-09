@@ -8,6 +8,16 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Turning auth off on an existing ValkeyCluster (`spec.auth.enabled` set to
+  `false`) now removes the password from the data pods. The init container only
+  seeded and re-keyed the operator-managed ACL users (`default`, `replicator`,
+  `sentinel-user`) in `users.acl` on the data volume, and left them in place
+  once auth was off. The aclfile wins over the now-absent `requirepass`, so the
+  pods kept requiring the old password (`NOAUTH`) and the exporter, which no
+  longer gets it, could not log in. With auth off the init container now drops
+  those users, so `default` is `nopass` again, and keeps the users persisted by
+  `ACL SAVE` (ValkeyACL). The change applies on the rolling restart that turning
+  auth off already triggers.
 - The `valkey-cluster` chart documented `backup.s3.encryption` as
   `"" | AES256 | aws:kms`, but the CRD only accepts `AES256` or `KMS`, so a value
   copied from the chart was rejected at install. It also described
