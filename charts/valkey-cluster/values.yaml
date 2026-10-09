@@ -91,6 +91,10 @@ sentinel:
   replicas: 3
   quorum: 0
   image: ""
+  # Timings in milliseconds. 0 → operator defaults (5000 / 60000). Applied to
+  # running Sentinels without restarting them.
+  downAfterMilliseconds: 0
+  failoverTimeout: 0
 
 # Pod scheduling.
 nodeSelector: {}
