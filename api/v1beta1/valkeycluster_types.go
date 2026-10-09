@@ -409,7 +409,8 @@ type S3Spec struct {
 	// +optional
 	Encryption string `json:"encryption,omitempty"`
 
-	// KMSKeyID is the KMS key ARN/ID/alias when Encryption=aws:kms.
+	// KMSKeyID is the KMS key ARN/ID/alias used when Encryption=KMS. Empty
+	// lets the S3 service pick its default KMS key (aws/s3 on AWS).
 	// +optional
 	KMSKeyID string `json:"kmsKeyId,omitempty"`
 }

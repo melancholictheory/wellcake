@@ -697,9 +697,11 @@ func renderInitScript(vc *cachev1beta1.ValkeyCluster) string {
 	// password). When a password is configured we therefore seed the default
 	// user (carrying that password) into users.acl, but only when the file is
 	// absent/empty so a persisted `ACL SAVE` (written by ValkeyACLReconciler) is
-	// never clobbered on restart. With no password we leave it empty so the
-	// default user stays nopass, matching auth-disabled intent. The file must
-	// exist regardless — Valkey refuses to start if aclfile points at nothing.
+	// never clobbered on restart. With no password the default user must stay
+	// nopass, matching auth-disabled intent: we leave a new file empty, and on a
+	// volume seeded while auth was on we drop the operator-managed users (an
+	// absent default user is nopass) and keep the others. The file must exist
+	// regardless — Valkey refuses to start if aclfile points at nothing.
 	// For Sentinel topology, seed a dedicated least-data-exposure ACL user that
 	// Sentinel uses to reach the master (sentinel auth-user). It gets the minimal
 	// per-command set Sentinel needs (sentinelACLCommands) plus all pub/sub
@@ -750,6 +752,9 @@ if [ -n "${VALKEY_PASSWORD:-}" ]; then
   fi
 elif [ ! -s %[2]s/users.acl ]; then
   : > %[2]s/users.acl
+elif grep -qE "^user (default|%[5]s) " %[2]s/users.acl; then
+  grep -vE "^user (default|%[5]s) " %[2]s/users.acl > %[2]s/users.acl.new || true
+  mv %[2]s/users.acl.new %[2]s/users.acl
 fi
 # Unlike valkeyConfigArg, this only escapes for double-quoted config values.
 valkey_config_arg() {

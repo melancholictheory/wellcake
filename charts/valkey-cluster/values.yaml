@@ -133,8 +133,8 @@ backup:
     region: us-east-1
     prefix: ""
     credentialsSecret: ""
-    encryption: ""        # "" (off) | AES256 | aws:kms
-    kmsKeyId: ""          # required when encryption=aws:kms
+    encryption: ""        # "" (off) | AES256 | KMS
+    kmsKeyId: ""          # optional, with encryption=KMS; empty uses the S3 default KMS key
   # Example:
   # allowFrom:
   #   - podSelector:

@@ -1053,7 +1053,9 @@ spec:
                           empty for AWS S3.
                         type: string
                       kmsKeyId:
-                        description: KMSKeyID is the KMS key ARN/ID/alias when Encryption=aws:kms.
+                        description: |-
+                          KMSKeyID is the KMS key ARN/ID/alias used when Encryption=KMS. Empty
+                          lets the S3 service pick its default KMS key (aws/s3 on AWS).
                         type: string
                       prefix:
                         description: |-
@@ -1986,7 +1988,9 @@ spec:
                           empty for AWS S3.
                         type: string
                       kmsKeyId:
-                        description: KMSKeyID is the KMS key ARN/ID/alias when Encryption=aws:kms.
+                        description: |-
+                          KMSKeyID is the KMS key ARN/ID/alias used when Encryption=KMS. Empty
+                          lets the S3 service pick its default KMS key (aws/s3 on AWS).
                         type: string
                       prefix:
                         description: |-
@@ -3645,7 +3649,9 @@ spec:
                           empty for AWS S3.
                         type: string
                       kmsKeyId:
-                        description: KMSKeyID is the KMS key ARN/ID/alias when Encryption=aws:kms.
+                        description: |-
+                          KMSKeyID is the KMS key ARN/ID/alias used when Encryption=KMS. Empty
+                          lets the S3 service pick its default KMS key (aws/s3 on AWS).
                         type: string
                       prefix:
                         description: |-
@@ -4592,7 +4598,9 @@ spec:
                           empty for AWS S3.
                         type: string
                       kmsKeyId:
-                        description: KMSKeyID is the KMS key ARN/ID/alias when Encryption=aws:kms.
+                        description: |-
+                          KMSKeyID is the KMS key ARN/ID/alias used when Encryption=KMS. Empty
+                          lets the S3 service pick its default KMS key (aws/s3 on AWS).
                         type: string
                       prefix:
                         description: |-

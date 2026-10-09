@@ -6,6 +6,7 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"maps"
 	"os"
@@ -366,6 +367,104 @@ func TestRenderInitScriptNoPasswordLeavesACLEmpty(t *testing.T) {
 	script := renderInitScript(vc)
 	if !strings.Contains(script, ": > "+dataMountPath+"/users.acl") {
 		t.Errorf("init script should fall back to an empty users.acl when no password\n%s", script)
+	}
+}
+
+// runInitScript executes the rendered config-init script against temp dirs
+// standing in for the config and data mounts, as the init container would, and
+// returns the resulting users.acl. An empty password runs it as with auth off
+// (no VALKEY_PASSWORD in the environment).
+func runInitScript(t *testing.T, vc *cachev1beta1.ValkeyCluster, dataDir, password string) string {
+	t.Helper()
+	cfgDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(cfgDir, "valkey.conf"), []byte("port 6379\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	script := strings.NewReplacer(configMountPath, cfgDir, dataMountPath, dataDir).Replace(renderInitScript(vc))
+	cmd := exec.Command("sh", "-c", script)
+	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOSTNAME=" + vc.Name + "-1", "POD_NAMESPACE=" + vc.Namespace}
+	if password != "" {
+		cmd.Env = append(cmd.Env, "VALKEY_PASSWORD="+password)
+	}
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("init script failed: %v\n%s", err, out)
+	}
+	acl, err := os.ReadFile(filepath.Join(dataDir, "users.acl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(acl)
+}
+
+// Turning auth off must drop the password the operator seeded into users.acl on
+// the data volume: the init script only seeded and re-keyed it, so a cluster
+// switched to auth.enabled=false kept requiring the old password (the
+// aclfile wins over the now-absent requirepass) and the exporter, which no
+// longer gets the password, could not log in. Users persisted by ACL SAVE
+// (ValkeyACL) must survive both ways.
+func TestInitScriptAuthToggleRewritesManagedACLUsers(t *testing.T) {
+	const pw = "s3cret"
+	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(pw)))
+	const appUser = "user app on #0123 ~app:* +get"
+
+	cluster := minimalCR()
+	cluster.Spec.Topology = cachev1beta1.TopologyCluster
+	cluster.Spec.Shards = ptr.To[int32](3)
+	standalone := minimalCR()
+	standalone.Spec.Topology = cachev1beta1.TopologyStandalone
+	for name, vc := range map[string]*cachev1beta1.ValkeyCluster{
+		"standalone":  standalone,
+		"replication": minimalCR(),
+		"sentinel":    sentinelCR(),
+		"cluster":     cluster,
+	} {
+		t.Run(name, func(t *testing.T) {
+			managed := []string{"default"}
+			if topologyReplicates(vc) {
+				managed = append(managed, replicationACLUser)
+			}
+			if vc.Spec.Topology == cachev1beta1.TopologySentinel {
+				managed = append(managed, sentinelACLUser)
+			}
+			dataDir := t.TempDir()
+
+			// Auth on: every operator-managed user carries the password hash.
+			acl := runInitScript(t, vc, dataDir, pw)
+			for _, u := range managed {
+				if !strings.Contains(acl, "user "+u+" on #"+hash+" ") {
+					t.Fatalf("auth on: %s not seeded with the password\n%s", u, acl)
+				}
+			}
+			// A user persisted by ACL SAVE (ValkeyACL).
+			if err := os.WriteFile(filepath.Join(dataDir, "users.acl"), []byte(acl+appUser+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			// Auth off: no operator-managed user left, so default is nopass again.
+			acl = runInitScript(t, vc, dataDir, "")
+			for _, u := range managed {
+				if strings.Contains(acl, "user "+u+" ") {
+					t.Errorf("auth off: %s still in users.acl\n%s", u, acl)
+				}
+			}
+			if strings.Contains(acl, hash) {
+				t.Errorf("auth off: password hash still in users.acl\n%s", acl)
+			}
+			if !strings.Contains(acl, appUser) {
+				t.Errorf("auth off: ValkeyACL user lost\n%s", acl)
+			}
+
+			// Auth on again: managed users re-seeded, ValkeyACL user kept.
+			acl = runInitScript(t, vc, dataDir, pw)
+			for _, u := range managed {
+				if !strings.Contains(acl, "user "+u+" on #"+hash+" ") {
+					t.Errorf("auth back on: %s not re-seeded\n%s", u, acl)
+				}
+			}
+			if !strings.Contains(acl, appUser) {
+				t.Errorf("auth back on: ValkeyACL user lost\n%s", acl)
+			}
+		})
 	}
 }
 
