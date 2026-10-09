@@ -115,10 +115,13 @@ Services:
 - `<name>-sentinel` — headless Service for the Sentinel pods on 26379.
   With TLS it uses 26380.
 
-Give Sentinel clients the per-pod names, one per Sentinel:
-`<name>-sentinel-0.<name>-sentinel:26379` and so on. The data pods and the
-Sentinel pods carry the same labels, so the headless names `<name>-headless`
-and `<name>-sentinel` each resolve to both sets of pods.
+`<name>-sentinel` resolves to the Sentinel pods only, so Sentinel clients can
+use it directly. The headless `<name>-headless` resolves to the Sentinel pods
+as well as the data pods; use the per-pod names under it, not the bare name.
+
+A Sentinel keeps its ID across restarts (the init container carries `sentinel
+myid` over from the previous config on its volume), and a re-created Sentinel
+starts by monitoring the primary the other Sentinels report.
 
 ## Cluster
 

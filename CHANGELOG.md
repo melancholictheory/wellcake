@@ -24,6 +24,23 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `backup.s3.kmsKeyId` as required, while it is optional: left empty, uploads
   use the S3 service's default KMS key. The chart values and the `kmsKeyId` field
   description in the CRD now say `KMS`.
+- In the Sentinel topology the headless `<name>-sentinel` Service also
+  resolved to the data pods, so about half of the connections to
+  `<name>-sentinel:26379` were refused (#61). The Sentinel pods now carry a
+  `valkey.wellcake.io/plane: sentinel` label, and the operator adds it to the
+  Service selector once every Sentinel pod has it, so DNS never goes empty
+  during the rollout.
+- A Sentinel came back from every restart with a new ID, and the other
+  Sentinels kept the old one as a dead peer that still counted toward the
+  majority a failover needs (#62). After a few restarts, losing one more
+  Sentinel blocked the failover. The init container now carries `sentinel
+  myid` and `sentinel current-epoch` over from the previous config on the
+  Sentinel's volume, and asks the other Sentinels for the current primary
+  (highest config epoch) instead of starting from pod-0 as written in the
+  ConfigMap. Dead peers that earlier restarts already left behind stay until
+  `SENTINEL RESET mymaster` is run on each Sentinel, one at a time.
+- Upgrading changes the Sentinel pod template, so the Sentinel pods restart
+  once, one at a time. The data pods do not restart.
 
 ## [0.11.0]
 
