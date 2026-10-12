@@ -514,6 +514,11 @@ type MetricsSpec struct {
 	// ServiceMonitor creates a Prometheus Operator ServiceMonitor.
 	// +optional
 	ServiceMonitor bool `json:"serviceMonitor,omitempty"`
+
+	// Resources for the metrics exporter container. Unset leaves the container
+	// without requests or limits.
+	// +optional
+	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
 }
 
 // SentinelSpec configures Sentinel topology specifics.
@@ -530,6 +535,11 @@ type SentinelSpec struct {
 	// Image of the Sentinel container. Defaults to the same image as Valkey.
 	// +optional
 	Image string `json:"image,omitempty"`
+
+	// Resources for the Sentinel container. Unset leaves the container without
+	// requests or limits.
+	// +optional
+	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
 }
 
 // ValkeyClusterPhase reflects high-level lifecycle state.

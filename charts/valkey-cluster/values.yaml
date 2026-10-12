@@ -80,6 +80,8 @@ metrics:
   image: ""
   imagePullPolicy: ""
   serviceMonitor: false
+  # Resources for the exporter container. Empty → none set.
+  resources: {}
 
 # Free-form Valkey config directives appended to valkey.conf.
 config: {}
@@ -91,6 +93,8 @@ sentinel:
   replicas: 3
   quorum: 0
   image: ""
+  # Resources for the Sentinel container. Empty → none set.
+  resources: {}
 
 # Pod scheduling.
 nodeSelector: {}

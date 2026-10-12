@@ -6,6 +6,16 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `spec.sentinel.resources` and `spec.metrics.resources` on `ValkeyCluster`
+  (v1beta1 and v1alpha1) set the requests and limits of the Sentinel container
+  and of the metrics exporter sidecar. `spec.resources` only applies to the
+  Valkey container, so these two containers had none, or a namespace
+  LimitRange's defaults. Left unset, nothing changes and no pod restarts. The
+  `valkey-cluster` chart exposes them as `sentinel.resources` and
+  `metrics.resources`.
+
 ### Fixed
 
 - Turning auth off on an existing ValkeyCluster (`spec.auth.enabled` set to

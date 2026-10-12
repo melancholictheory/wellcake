@@ -414,6 +414,7 @@ func buildSentinelStatefulSet(vc *cachev1beta1.ValkeyCluster, proactive bool) *a
 							ContainerPort: port,
 							Protocol:      corev1.ProtocolTCP,
 						}},
+						Resources:       vc.Spec.Sentinel.Resources,
 						VolumeMounts:    volumeMounts,
 						ReadinessProbe:  tcpProbe(port, 5, 5),
 						LivenessProbe:   tcpProbe(port, 15, 20),

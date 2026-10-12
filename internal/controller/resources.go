@@ -1412,6 +1412,7 @@ func buildExporter(vc *cachev1beta1.ValkeyCluster) corev1.Container {
 		ImagePullPolicy: vc.Spec.Metrics.ImagePullPolicy,
 		Env:             env,
 		Ports:           []corev1.ContainerPort{{Name: metricsPortName, ContainerPort: exporterPort}},
+		Resources:       vc.Spec.Metrics.Resources,
 	}
 }
 

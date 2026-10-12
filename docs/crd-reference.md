@@ -29,6 +29,7 @@ Short names: `vk`, `vkc`. Printer columns: `Topology`, `Replicas`,
 | `sentinel.replicas`           | int32 ≥3                   | 3              | Number of Sentinel pods. |
 | `sentinel.quorum`             | int32                      | `replicas/2+1` | Quorum for failover. |
 | `sentinel.image`              | string                     | inherited      | |
+| `sentinel.resources`          | k8s ResourceRequirements   | —              | Applied to the Sentinel container. Unset → no requests or limits. Changing it rolls the Sentinel pods. |
 | `resources`                   | k8s ResourceRequirements   | —              | Applied to the Valkey container. `maxmemory` is automatically set to 60% of `limits.memory` unless overridden in `spec.config.maxmemory`. |
 | `storage`                     | `StorageSpec`              | —              | |
 | `storage.size`                | resource.Quantity          | `10Gi`         | **Expand-only** (CEL). The Cache profile defaults to 1Gi. |
@@ -48,6 +49,7 @@ Short names: `vk`, `vkc`. Printer columns: `Topology`, `Replicas`,
 | `metrics.image`               | string                     | `oliver006/redis_exporter:v1.62.0` | |
 | `metrics.imagePullPolicy`     | `Always\|Never\|IfNotPresent` |  —          | Pull policy of the exporter sidecar. Unset → Kubernetes default. Changing it rolls the pods. |
 | `metrics.serviceMonitor`      | bool                       | `false`        | Creates a ServiceMonitor (Prometheus Operator) via unstructured; if the CRDs are not installed it is simply skipped. |
+| `metrics.resources`           | k8s ResourceRequirements   | —              | Applied to the exporter sidecar. Unset → no requests or limits. Changing it rolls the data pods. |
 | `config`                      | map[string]string          | —              | Arbitrary Valkey directives, appended to `valkey.conf`. |
 | `nodeSelector` / `tolerations`| standard                   | —              | |
 | `affinity`                    | *corev1.Affinity           | hostname anti-affinity | |

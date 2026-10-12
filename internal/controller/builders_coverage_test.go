@@ -11,6 +11,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
@@ -357,5 +358,40 @@ func TestBuildNetworkPolicy(t *testing.T) {
 	t9.Spec.TLS = &cachev1beta1.TLSSpec{Enabled: true}
 	if p := buildNetworkPolicy(t9).Spec.Ingress[0].Ports[0].Port.IntValue(); p != int(valkeyTLSPort) {
 		t.Errorf("TLS NP port = %d, want %d", p, valkeyTLSPort)
+	}
+}
+
+// spec.resources only sizes the Valkey container: the Sentinel container and
+// the exporter sidecar take their own, and stay without any when unset.
+func TestSentinelAndExporterResources(t *testing.T) {
+	vc := sentinelCR()
+	vc.Spec.Resources = corev1.ResourceRequirements{
+		Limits: corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("1Gi")},
+	}
+	vc.Spec.Metrics = &cachev1beta1.MetricsSpec{Enabled: true}
+
+	if got := buildSentinelStatefulSet(vc, false).Spec.Template.Spec.Containers[0].Resources; !equality.Semantic.DeepEqual(got, corev1.ResourceRequirements{}) {
+		t.Errorf("unset spec.sentinel.resources: sentinel container resources = %v, want none", got)
+	}
+	if got := buildExporter(vc).Resources; !equality.Semantic.DeepEqual(got, corev1.ResourceRequirements{}) {
+		t.Errorf("unset spec.metrics.resources: exporter resources = %v, want none", got)
+	}
+
+	sentinelRes := corev1.ResourceRequirements{
+		Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("50m"), corev1.ResourceMemory: resource.MustParse("64Mi")},
+		Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("100m"), corev1.ResourceMemory: resource.MustParse("128Mi")},
+	}
+	exporterRes := corev1.ResourceRequirements{
+		Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("20m"), corev1.ResourceMemory: resource.MustParse("32Mi")},
+		Limits:   corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("64Mi")},
+	}
+	vc.Spec.Sentinel.Resources = sentinelRes
+	vc.Spec.Metrics.Resources = exporterRes
+
+	if got := buildSentinelStatefulSet(vc, false).Spec.Template.Spec.Containers[0].Resources; !equality.Semantic.DeepEqual(got, sentinelRes) {
+		t.Errorf("sentinel container resources = %v, want %v", got, sentinelRes)
+	}
+	if got := buildExporter(vc).Resources; !equality.Semantic.DeepEqual(got, exporterRes) {
+		t.Errorf("exporter resources = %v, want %v", got, exporterRes)
 	}
 }

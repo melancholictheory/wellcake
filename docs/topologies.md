@@ -88,6 +88,8 @@ primary and elect a new one on failure.
 - Sentinel StatefulSet: `spec.sentinel.replicas` (minimum 3, odd
   recommended).
 - Sentinel quorum: `spec.sentinel.quorum` or `replicas/2 + 1`.
+- Sentinel container resources: `spec.sentinel.resources`. `spec.resources`
+  only applies to the Valkey container.
 - Operator-driven failover is **disabled** — the Sentinel quorum is
   authoritative.
 - Clients must use a Sentinel-aware library
