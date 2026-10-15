@@ -18,6 +18,15 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- In the Sentinel topology a change to the Sentinel config never reached the
+  Sentinel pods (#71). The init container copies `sentinel.conf` from the
+  ConfigMap only when a pod starts, and the Sentinel pod template carried no
+  hash of it. Turning auth off left the running Sentinels with `requirepass`,
+  so clients got `NOAUTH` and could not find the primary; a password rotation
+  or a TLS change stayed on the old values too. The Sentinel pod template now
+  carries a hash of `sentinel.conf`, so such a change rolls the Sentinels one at
+  a time. The timings from `spec.sentinel` are left out of the hash, since the
+  operator applies them live.
 - In the Sentinel topology the data pods ignored the current primary when they
   started (#64): pod-0 always came up as a primary and the others replicated from
   pod-0. After a failover that left a re-created replica chained behind pod-0,
