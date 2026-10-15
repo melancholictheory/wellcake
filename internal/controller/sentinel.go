@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -122,13 +123,14 @@ func (r *ValkeyClusterReconciler) reconcileSentinel(ctx context.Context, vc *cac
 	}
 
 	// Sentinel-specific objects.
-	if err := r.ensureSentinelConfigMap(ctx, vc, password); err != nil {
+	sentinelHash, err := r.ensureSentinelConfigMap(ctx, vc, password)
+	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("sentinel configmap: %w", err)
 	}
 	if err := r.ensureSentinelService(ctx, vc); err != nil {
 		return ctrl.Result{}, fmt.Errorf("sentinel service: %w", err)
 	}
-	sentinelSTS, err := r.ensureSentinelStatefulSet(ctx, vc)
+	sentinelSTS, err := r.ensureSentinelStatefulSet(ctx, vc, sentinelHash)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("sentinel statefulset: %w", err)
 	}
@@ -252,7 +254,7 @@ func sentinelListenPort(vc *cachev1beta1.ValkeyCluster) int32 {
 	return sentinelPort
 }
 
-func (r *ValkeyClusterReconciler) ensureSentinelConfigMap(ctx context.Context, vc *cachev1beta1.ValkeyCluster, password string) error {
+func (r *ValkeyClusterReconciler) ensureSentinelConfigMap(ctx context.Context, vc *cachev1beta1.ValkeyCluster, password string) (string, error) {
 	cm := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      vc.Name + "-sentinel-config",
@@ -261,20 +263,36 @@ func (r *ValkeyClusterReconciler) ensureSentinelConfigMap(ctx context.Context, v
 		},
 		Data: map[string]string{sentinelConfigName: renderSentinelConf(vc, password)},
 	}
+	hash := sentinelConfigHash(cm.Data[sentinelConfigName])
 	if err := controllerutil.SetControllerReference(vc, cm, r.Scheme); err != nil {
-		return err
+		return "", err
 	}
 	var existing corev1.ConfigMap
 	err := r.Get(ctx, client.ObjectKeyFromObject(cm), &existing)
 	if apierrors.IsNotFound(err) {
-		return r.Create(ctx, cm)
+		return hash, r.Create(ctx, cm)
 	}
 	if err != nil {
-		return err
+		return "", err
 	}
 	existing.Data = cm.Data
 	existing.Labels = cm.Labels
-	return r.Update(ctx, &existing)
+	return hash, r.Update(ctx, &existing)
+}
+
+// sentinelConfigHash hashes sentinel.conf for the Sentinel pod template, so a
+// change that only takes effect on restart (auth, TLS, port) rolls the Sentinel
+// pods. The ConfigMap only seeds runtime-sentinel.conf when a pod starts. The
+// timings are left out: applySentinelTimings sets them live with SENTINEL SET.
+func sentinelConfigHash(conf string) string {
+	var kept []string
+	for line := range strings.SplitSeq(conf, "\n") {
+		if strings.HasPrefix(line, "sentinel down-after-milliseconds ") || strings.HasPrefix(line, "sentinel failover-timeout ") {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return configHashFromData(map[string]string{sentinelConfigName: strings.Join(kept, "\n")})
 }
 
 func (r *ValkeyClusterReconciler) ensureSentinelService(ctx context.Context, vc *cachev1beta1.ValkeyCluster) error {
@@ -336,8 +354,11 @@ func (r *ValkeyClusterReconciler) sentinelPodsLabeled(ctx context.Context, vc *c
 	return true, nil
 }
 
-func (r *ValkeyClusterReconciler) ensureSentinelStatefulSet(ctx context.Context, vc *cachev1beta1.ValkeyCluster) (*appsv1.StatefulSet, error) {
+func (r *ValkeyClusterReconciler) ensureSentinelStatefulSet(ctx context.Context, vc *cachev1beta1.ValkeyCluster, configHash string) (*appsv1.StatefulSet, error) {
 	sts := buildSentinelStatefulSet(vc, proactiveRolloutEnabled(vc))
+	if configHash != "" {
+		sts.Spec.Template.Annotations = map[string]string{configHashAnnotation: configHash}
+	}
 	if err := controllerutil.SetControllerReference(vc, sts, r.Scheme); err != nil {
 		return nil, err
 	}
