@@ -18,6 +18,18 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- In the Sentinel topology with persistence off, a primary whose Valkey
+  process restarted (OOMKill, failed liveness probe) came back as the primary
+  from the `dump.rdb` of an old resync, or empty, and its replicas resynced from
+  it (#70). The kubelet restarts the container in place without the init
+  container, and Sentinel saw only a `+reboot`, so there was no failover. The
+  data container now checks on every start: a pod the Sentinels still report as
+  the primary waits without listening until they fail over to a replica that
+  holds the data, then starts as its replica. With no failover within 90 s, for
+  example with no replica to promote, it starts as the primary with what is on
+  disk. A replica that restarts drops its old `dump.rdb`. This changes the data
+  pods' command, so they restart once on upgrade, and a primary that restarts
+  is now always failed over.
 - In the Sentinel topology the data pods ignored the current primary when they
   started (#64): pod-0 always came up as a primary and the others replicated from
   pod-0. After a failover that left a re-created replica chained behind pod-0,
