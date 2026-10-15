@@ -83,6 +83,12 @@ spec:
     resources:
       {{- toYaml . | nindent 6 }}
     {{- end }}
+    {{- if .Values.sentinel.downAfterMilliseconds }}
+    downAfterMilliseconds: {{ .Values.sentinel.downAfterMilliseconds }}
+    {{- end }}
+    {{- if .Values.sentinel.failoverTimeout }}
+    failoverTimeout: {{ .Values.sentinel.failoverTimeout }}
+    {{- end }}
   {{- end }}
   {{- with .Values.nodeSelector }}
   nodeSelector:

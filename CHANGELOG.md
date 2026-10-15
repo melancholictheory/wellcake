@@ -15,9 +15,48 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   LimitRange's defaults. Left unset, nothing changes and no pod restarts. The
   `valkey-cluster` chart exposes them as `sentinel.resources` and
   `metrics.resources`.
+- `spec.sentinel.downAfterMilliseconds` and `spec.sentinel.failoverTimeout` on
+  `ValkeyCluster` (v1beta1 and v1alpha1) to tune Sentinel failure detection and
+  failover, which were hard-coded to 5000 and 60000 ms. A change is pushed to
+  the running Sentinels with `SENTINEL SET` (only when a value differs), so it
+  takes effect without restarting them; the Sentinel ConfigMap carries the same
+  values for pods that start later. Left unset, the defaults are unchanged. The
+  `valkey-cluster` chart exposes them under `sentinel`.
 
 ### Fixed
 
+- In the Sentinel topology a change to the Sentinel config never reached the
+  Sentinel pods (#71). The init container copies `sentinel.conf` from the
+  ConfigMap only when a pod starts, and the Sentinel pod template carried no
+  hash of it. Turning auth off left the running Sentinels with `requirepass`,
+  so clients got `NOAUTH` and could not find the primary; a password rotation
+  or a TLS change stayed on the old values too. The Sentinel pod template now
+  carries a hash of `sentinel.conf`, so such a change rolls the Sentinels one at
+  a time. The timings from `spec.sentinel` are left out of the hash, since the
+  operator applies them live.
+- In the Sentinel topology the data pods ignored the current primary when they
+  started (#64): pod-0 always came up as a primary and the others replicated from
+  pod-0. After a failover that left a re-created replica chained behind pod-0,
+  out of Sentinel's sight, and a re-created pod-0 serving writes as a primary
+  from the RDB of its last resync until Sentinel demoted it. The init container
+  now asks the Sentinels for the primary (highest config epoch) and replicates
+  from it, or starts as the primary when the Sentinels name this pod. An answer
+  that is neither this pod nor a reachable primary, such as a primary that is
+  restarting, is retried for up to 90 s while the Sentinels fail over, and pod-0
+  is the fallback when no Sentinel answers. With persistence off, a pod that
+  starts as a replica drops its `dump.rdb`.
+- In the Sentinel topology the data pods announced no address, so the primary
+  reported its replicas by pod IP and Sentinel tracked them by IP (#63). Every
+  re-created pod left a dead entry behind and was not reconfigured under its
+  new IP, which could leave a re-created pod-0 as a second primary for good.
+  The data pods now announce their DNS name (`replica-announce-ip`), and a
+  primary the Sentinels still report by IP is followed by its pod's name.
+- Upgrading changes the Sentinel topology's data pods, so they restart once,
+  one at a time, with a failover when the primary restarts. Entries that
+  Sentinel recorded by IP before the upgrade stay as `s_down` until
+  `SENTINEL RESET mymaster` is run on each Sentinel, one at a time, and a
+  replica can stay chained behind another one until the next failover or its
+  next restart.
 - Turning auth off on an existing ValkeyCluster (`spec.auth.enabled` set to
   `false`) now removes the password from the data pods. The init container only
   seeded and re-keyed the operator-managed ACL users (`default`, `replicator`,

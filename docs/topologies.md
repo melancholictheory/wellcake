@@ -90,6 +90,9 @@ primary and elect a new one on failure.
 - Sentinel quorum: `spec.sentinel.quorum` or `replicas/2 + 1`.
 - Sentinel container resources: `spec.sentinel.resources`. `spec.resources`
   only applies to the Valkey container.
+- Sentinel timings: `spec.sentinel.downAfterMilliseconds` (default 5000) and
+  `spec.sentinel.failoverTimeout` (default 60000). A change is pushed to the
+  running Sentinels with `SENTINEL SET`, without restarting them.
 - Operator-driven failover is **disabled** — the Sentinel quorum is
   authoritative.
 - Clients must use a Sentinel-aware library
@@ -120,6 +123,11 @@ Services:
 `<name>-sentinel` resolves to the Sentinel pods only, so Sentinel clients can
 use it directly. The headless `<name>-headless` resolves to the Sentinel pods
 as well as the data pods; use the per-pod names under it, not the bare name.
+
+The data pods announce their DNS name to the primary, so Sentinel tracks them
+by name rather than by pod IP. When a data pod starts, its init container asks
+the Sentinels for the current primary and replicates from it; only on the first
+bootstrap, with no Sentinel answering, does pod-0 start as the primary.
 
 A Sentinel keeps its ID across restarts (the init container carries `sentinel
 myid` over from the previous config on its volume), and a re-created Sentinel

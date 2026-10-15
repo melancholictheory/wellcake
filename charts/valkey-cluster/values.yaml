@@ -95,6 +95,10 @@ sentinel:
   image: ""
   # Resources for the Sentinel container. Empty → none set.
   resources: {}
+  # Timings in milliseconds. 0 → operator defaults (5000 / 60000). Applied to
+  # running Sentinels without restarting them.
+  downAfterMilliseconds: 0
+  failoverTimeout: 0
 
 # Pod scheduling.
 nodeSelector: {}

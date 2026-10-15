@@ -575,6 +575,21 @@ type SentinelSpec struct {
 	// requests or limits.
 	// +optional
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+
+	// DownAfterMilliseconds is how long the primary must be unreachable before a
+	// Sentinel considers it down (sentinel down-after-milliseconds). If zero,
+	// 5000. A change is applied to running Sentinels with SENTINEL SET, without
+	// restarting them.
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	DownAfterMilliseconds int32 `json:"downAfterMilliseconds,omitempty"`
+
+	// FailoverTimeout, in milliseconds, bounds a failover and delays a retry on
+	// the same primary (sentinel failover-timeout). If zero, 60000. A change is
+	// applied to running Sentinels with SENTINEL SET, without restarting them.
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	FailoverTimeout int32 `json:"failoverTimeout,omitempty"`
 }
 
 // ValkeyClusterPhase reflects high-level lifecycle state.

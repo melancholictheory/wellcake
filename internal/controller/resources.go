@@ -823,11 +823,124 @@ fi
 `, svcPart, port, clusterBusPort, dataMountPath)
 	}
 
+	if vc.Spec.Topology == cachev1beta1.TopologySentinel && vc.Spec.Sentinel != nil {
+		return common + renderSentinelDataRole(vc)
+	}
+
 	return common + fmt.Sprintf(`ORDINAL="${HOSTNAME##*-}"
 if [ "$ORDINAL" != "0" ]; then
   echo "replicaof %[1]s-0.%[2]s.${POD_NAMESPACE}.svc.cluster.local %[3]d" >> %[4]s/runtime.conf
 fi
 `, stsName, headless, port, dataMountPath)
+}
+
+// sentinelPrimaryWaitSeconds bounds how long a data pod's init waits for the
+// Sentinels to report a reachable primary (see renderSentinelDataRole).
+const sentinelPrimaryWaitSeconds = 90
+
+// renderSentinelDataRole is the tail of the data pods' init script in the
+// Sentinel topology. It decides how the pod starts:
+//   - it announces its stable DNS name (replica-announce-ip), so the primary
+//     reports it by name and Sentinel keeps one entry per pod whatever its IP;
+//   - it asks the Sentinels for the current primary (highest config-epoch) and
+//     replicates from it, or starts as the primary when that is this pod. An
+//     answer that is neither this pod nor a reachable primary (a primary that is
+//     restarting is still reported under its old IP) is retried until the
+//     Sentinels fail over, for up to sentinelPrimaryWaitSeconds. Only
+//     when no Sentinel answers (first bootstrap) does pod-0 start as the primary
+//     and the others replicate from pod-0;
+//   - a pod that starts as a replica with persistence off drops dump.rdb, which
+//     only holds the RDB of an earlier resync, so it never serves stale data.
+func renderSentinelDataRole(vc *cachev1beta1.ValkeyCluster) string {
+	port := valkeyPort
+	if tlsEnabled(vc) {
+		port = valkeyTLSPort
+	}
+	auth := ""
+	if vc.Spec.AuthEnabled() {
+		auth = noAuthWarningArgs
+	}
+	tlsArgs := ""
+	if tlsEnabled(vc) {
+		tlsArgs = fmt.Sprintf(" --tls --cacert %[1]s/%[2]s --cert %[1]s/%[3]s --key %[1]s/%[4]s",
+			tlsMountPath, secretKeyTLSCACert, secretKeyTLSCert, secretKeyTLSKey)
+	}
+	dropRDB := ""
+	if persistenceMode(vc) == storageModeNone {
+		dropRDB = fmt.Sprintf("  rm -f %s/dump.rdb\n", dataMountPath)
+	}
+	return fmt.Sprintf(`ORDINAL="${HOSTNAME##*-}"
+SELF="${HOSTNAME}.%[1]s.${POD_NAMESPACE}.svc.cluster.local"
+echo "replica-announce-ip ${SELF}" >> %[2]s/runtime.conf
+SEN=%[3]s
+query_sentinels() {
+  BEST_EPOCH=-1
+  BEST_HOST=""
+  BEST_PORT=""
+  i=0
+  while [ "$i" -lt %[4]d ]; do
+    OUT=$(timeout 3 valkey-cli -h "$SEN-$i.$SEN" -p %[5]d%[6]s%[7]s SENTINEL MASTER %[8]s 2>/dev/null || true)
+    set -- $(printf '%%s\n' "$OUT" | awk 'NR %% 2 == 1 { k = $0 } NR %% 2 == 0 { v[k] = $0 } END { if (v["ip"] != "" && v["config-epoch"] ~ /^[0-9]+$/) print v["ip"], v["port"], v["config-epoch"] }')
+    if [ "$#" -eq 3 ] && [ "$3" -gt "$BEST_EPOCH" ]; then
+      BEST_HOST=$1
+      BEST_PORT=$2
+      BEST_EPOCH=$3
+    fi
+    i=$((i + 1))
+  done
+}
+is_self() {
+  [ "$1" = "$SELF" ] || hostname -i 2>/dev/null | tr ' ' '\n' | grep -qxF "$1"
+}
+is_primary() {
+  [ "$(timeout 3 valkey-cli -h "$1" -p "$2"%[6]s%[7]s ROLE 2>/dev/null | head -n 1)" = master ]
+}
+# A primary that restarts is still reported under its old address until the
+# Sentinels fail over, so only trust an answer that is this pod or a reachable
+# primary, and give the Sentinels time to fail over otherwise.
+DEADLINE=$(($(date +%%s) + %[12]d))
+while :; do
+  query_sentinels
+  if [ -z "$BEST_HOST" ] || is_self "$BEST_HOST" || is_primary "$BEST_HOST" "$BEST_PORT"; then
+    break
+  fi
+  if [ "$(date +%%s)" -ge "$DEADLINE" ]; then
+    echo "the Sentinels still report $BEST_HOST:$BEST_PORT, which is not a reachable primary; falling back to pod-0"
+    BEST_HOST=""
+    break
+  fi
+  echo "waiting for the Sentinels to report a reachable primary (now $BEST_HOST:$BEST_PORT)"
+  sleep 3
+done
+PRIMARY=""
+if [ -n "$BEST_HOST" ]; then
+  if is_self "$BEST_HOST"; then
+    echo "starting as the primary, as reported by the Sentinels (config-epoch $BEST_EPOCH)"
+  else
+    # The Sentinels report a primary by IP until a failover promotes a pod that
+    # announces its name. Replicate from the pod's name instead, so the link
+    # survives that pod getting a new IP.
+    j=0
+    while [ "$j" -lt %[13]d ]; do
+      NAME="%[9]s-$j.%[1]s.${POD_NAMESPACE}.svc.cluster.local"
+      if getent hosts "$NAME" 2>/dev/null | awk '{ print $1 }' | grep -qxF "$BEST_HOST"; then
+        BEST_HOST=$NAME
+        break
+      fi
+      j=$((j + 1))
+    done
+    PRIMARY="$BEST_HOST $BEST_PORT"
+    echo "replicating from $PRIMARY, as reported by the Sentinels (config-epoch $BEST_EPOCH)"
+  fi
+elif [ "$ORDINAL" != "0" ]; then
+  PRIMARY="%[9]s-0.%[1]s.${POD_NAMESPACE}.svc.cluster.local %[10]d"
+fi
+if [ -n "$PRIMARY" ]; then
+  echo "replicaof $PRIMARY" >> %[2]s/runtime.conf
+%[11]sfi
+`, headlessServiceName(vc), dataMountPath, sentinelStatefulSetName(vc), vc.Spec.Sentinel.Replicas,
+		sentinelListenPort(vc), tlsArgs, auth, sentinelMasterName, statefulSetName(vc), port, dropRDB,
+		sentinelPrimaryWaitSeconds, vc.Spec.Replicas)
 }
 
 // totalReplicas returns the spec-desired pod count: the value we want once
@@ -1015,6 +1128,12 @@ func buildStatefulSet(vc *cachev1beta1.ValkeyCluster, configHash string, proacti
 			corev1.VolumeMount{Name: tlsVolumeName, MountPath: tlsMountPath, ReadOnly: true},
 			corev1.VolumeMount{Name: sourceCAVolumeName, MountPath: sourceCAMountPath, ReadOnly: true},
 		)
+	}
+	// Sentinel: config-init asks the Sentinels for the current primary, over TLS
+	// when it is on.
+	if vc.Spec.Topology == cachev1beta1.TopologySentinel && tlsEnabled(vc) && !sourceCAMergeEnabled(vc) {
+		configInitMounts = append(configInitMounts,
+			corev1.VolumeMount{Name: tlsVolumeName, MountPath: tlsMountPath, ReadOnly: true})
 	}
 	initContainers = append(initContainers, corev1.Container{
 		Name:            "config-init",

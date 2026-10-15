@@ -30,6 +30,7 @@ type respMock struct {
 	ln              net.Listener
 	infoReplication string
 	clusterNodes    string
+	sentinelMaster  []string // flat field/value reply to SENTINEL MASTER
 
 	mu       sync.Mutex
 	commands [][]string
@@ -107,6 +108,18 @@ func (m *respMock) handle(conn net.Conn) {
 			writeBulk(conn, m.infoReplication)
 		case "CLUSTER":
 			writeBulk(conn, m.clusterNodes)
+		case "SENTINEL":
+			if len(args) > 1 && strings.EqualFold(args[1], "MASTER") {
+				m.mu.Lock()
+				fields := m.sentinelMaster
+				m.mu.Unlock()
+				_, _ = fmt.Fprintf(conn, "*%d\r\n", len(fields))
+				for _, f := range fields {
+					writeBulk(conn, f)
+				}
+				continue
+			}
+			_, _ = io.WriteString(conn, "+OK\r\n")
 		default:
 			_, _ = io.WriteString(conn, "+OK\r\n")
 		}
