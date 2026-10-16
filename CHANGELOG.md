@@ -4,6 +4,20 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims to
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- In the Sentinel topology the operator now cleans up dead Sentinel entries
+  (#62). A Sentinel that came back with a new ID (an older operator, or a lost
+  volume) left the others counting a dead peer, which raises the majority a
+  failover needs, and replica entries recorded by IP before the data pods
+  announced their name stayed as `s_down`. When every Sentinel is up, they agree
+  on a healthy master and none of them is still finding its peers, the operator
+  runs `SENTINEL RESET` on one Sentinel that has such entries, then waits for it
+  to find its peers again before the next one. The manual reset from the 0.12.0
+  upgrade notes is no longer needed.
+
 ## [0.12.0]
 
 ### Added

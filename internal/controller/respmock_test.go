@@ -27,10 +27,11 @@ import (
 // every command received — so we can assert the wrappers issue the right
 // arguments and parse realistic replies, with no external dependency.
 type respMock struct {
-	ln              net.Listener
-	infoReplication string
-	clusterNodes    string
-	sentinelMaster  []string // flat field/value reply to SENTINEL MASTER
+	ln               net.Listener
+	infoReplication  string
+	clusterNodes     string
+	sentinelMaster   []string   // flat field/value reply to SENTINEL MASTER
+	sentinelReplicas [][]string // one flat field/value list per replica, for SENTINEL REPLICAS
 
 	mu       sync.Mutex
 	commands [][]string
@@ -116,6 +117,19 @@ func (m *respMock) handle(conn net.Conn) {
 				_, _ = fmt.Fprintf(conn, "*%d\r\n", len(fields))
 				for _, f := range fields {
 					writeBulk(conn, f)
+				}
+				continue
+			}
+			if len(args) > 1 && strings.EqualFold(args[1], "REPLICAS") {
+				m.mu.Lock()
+				reps := m.sentinelReplicas
+				m.mu.Unlock()
+				_, _ = fmt.Fprintf(conn, "*%d\r\n", len(reps))
+				for _, rep := range reps {
+					_, _ = fmt.Fprintf(conn, "*%d\r\n", len(rep))
+					for _, f := range rep {
+						writeBulk(conn, f)
+					}
 				}
 				continue
 			}
