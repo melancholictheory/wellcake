@@ -1066,7 +1066,7 @@ const clusterShutdownGraceSeconds int64 = 30
 // default). Shared by the single-STS and per-shard StatefulSets.
 func clusterShutdownGracePeriod(vc *cachev1beta1.ValkeyCluster) *int64 {
 	if vc.Spec.Topology == cachev1beta1.TopologyCluster && valkeyImageAtLeast(vc.Spec.Image, 9, 0) {
-		return ptr.To(clusterShutdownGraceSeconds)
+		return new(clusterShutdownGraceSeconds)
 	}
 	return nil
 }
@@ -1079,9 +1079,9 @@ func podSecurityContext(vc *cachev1beta1.ValkeyCluster) *corev1.PodSecurityConte
 		return vc.Spec.PodSecurityContext
 	}
 	return &corev1.PodSecurityContext{
-		FSGroup:        ptr.To(valkeyRunAsID),
-		RunAsUser:      ptr.To(valkeyRunAsID),
-		RunAsNonRoot:   ptr.To(true),
+		FSGroup:        new(valkeyRunAsID),
+		RunAsUser:      new(valkeyRunAsID),
+		RunAsNonRoot:   new(true),
 		SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
 	}
 }
@@ -1094,8 +1094,8 @@ func containerSecurityContext(vc *cachev1beta1.ValkeyCluster) *corev1.SecurityCo
 		return vc.Spec.ContainerSecurityContext
 	}
 	return &corev1.SecurityContext{
-		AllowPrivilegeEscalation: ptr.To(false),
-		RunAsNonRoot:             ptr.To(true),
+		AllowPrivilegeEscalation: new(false),
+		RunAsNonRoot:             new(true),
 		Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
 		SeccompProfile:           &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
 	}

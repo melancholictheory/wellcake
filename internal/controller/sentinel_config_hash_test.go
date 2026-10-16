@@ -13,7 +13,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	cachev1beta1 "github.com/melancholictheory/wellcake/api/v1beta1"
@@ -28,7 +27,7 @@ func TestSentinelConfigChangeRollsSentinelPods(t *testing.T) {
 		Spec: cachev1beta1.ValkeyClusterSpec{
 			Topology: cachev1beta1.TopologySentinel, Replicas: 3,
 			Sentinel: &cachev1beta1.SentinelSpec{Replicas: 3, Quorum: 2},
-			Auth:     &cachev1beta1.AuthSpec{Enabled: ptr.To(true)},
+			Auth:     &cachev1beta1.AuthSpec{Enabled: new(true)},
 		},
 	}
 	scheme := runtime.NewScheme()
@@ -56,12 +55,12 @@ func TestSentinelConfigChangeRollsSentinelPods(t *testing.T) {
 	if withAuth == "" {
 		t.Fatal("Sentinel pod template carries no config hash")
 	}
-	vc.Spec.Auth.Enabled = ptr.To(false)
+	vc.Spec.Auth.Enabled = new(false)
 	if podHash("") == withAuth {
 		t.Error("turning auth off did not change the Sentinel pod template")
 	}
 
-	vc.Spec.Auth.Enabled = ptr.To(true)
+	vc.Spec.Auth.Enabled = new(true)
 	vc.Spec.Sentinel.DownAfterMilliseconds = 2000
 	vc.Spec.Sentinel.FailoverTimeout = 20000
 	if podHash("secret") != withAuth {

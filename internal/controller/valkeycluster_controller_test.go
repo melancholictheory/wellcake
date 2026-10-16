@@ -217,7 +217,7 @@ var _ = Describe("ValkeyCluster reconcile (envtest)", func() {
 				Topology: cachev1beta1.TopologyReplication,
 				Profile:  cachev1beta1.ProfileCache,
 				Replicas: 3,
-				Auth:     &cachev1beta1.AuthSpec{Enabled: ptr.To(true)},
+				Auth:     &cachev1beta1.AuthSpec{Enabled: new(true)},
 			},
 		}
 		Expect(k8sClient.Create(ctx, vc)).To(Succeed())
@@ -311,7 +311,7 @@ var _ = Describe("ValkeyCluster reconcile (envtest)", func() {
 			Spec: cachev1beta1.ValkeyClusterSpec{
 				Topology: cachev1beta1.TopologyReplication,
 				Replicas: 3,
-				Auth:     &cachev1beta1.AuthSpec{Enabled: ptr.To(true)},
+				Auth:     &cachev1beta1.AuthSpec{Enabled: new(true)},
 				TLS:      &cachev1beta1.TLSSpec{Enabled: true, ExistingSecret: tlsSecret},
 			},
 		}
@@ -606,9 +606,9 @@ var _ = Describe("Zero-value fields that have a CRD default (envtest)", func() {
 		}
 		explicit := unset.DeepCopy()
 		explicit.Name = "typed-explicit"
-		explicit.Spec.AutoReshard = ptr.To(false)
-		explicit.Spec.Auth.Enabled = ptr.To(false)
-		explicit.Spec.PodDisruptionBudget.Enabled = ptr.To(false)
+		explicit.Spec.AutoReshard = new(false)
+		explicit.Spec.Auth.Enabled = new(false)
+		explicit.Spec.PodDisruptionBudget.Enabled = new(false)
 		explicit.Spec.Backup.Retention = ptr.To[int32](0)
 		for _, vc := range []*cachev1beta1.ValkeyCluster{unset, explicit} {
 			Expect(k8sClient.Create(ctx, vc)).To(Succeed())

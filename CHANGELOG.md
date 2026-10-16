@@ -6,6 +6,14 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Build: Go 1.26 (`go.mod` and the `golang:1.26` builder image), which
+  `github.com/prometheus/client_golang` 1.25.0 needs. Dependency bumps:
+  `client_golang` to 1.25.0 and `go-redis` to 9.23.0. The code uses the
+  Go 1.26 `new(value)` form instead of `ptr.To(value)` where the linter asks
+  for it.
+
 ### Fixed
 
 - In the Sentinel topology the operator now cleans up dead Sentinel entries

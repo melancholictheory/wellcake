@@ -381,7 +381,7 @@ func buildShardStatefulSet(vc *cachev1beta1.ValkeyCluster, shard int32, configHa
 	sts.Name = shardStsName(vc, shard)
 	sts.Labels = sl
 	sts.Spec.ServiceName = shardHeadlessName(vc, shard)
-	sts.Spec.Replicas = ptr.To(1 + replicasPerShardOf(vc))
+	sts.Spec.Replicas = new(1 + replicasPerShardOf(vc))
 	sts.Spec.Selector = &metav1.LabelSelector{MatchLabels: sl}
 	sts.Spec.Template.Labels = sl
 

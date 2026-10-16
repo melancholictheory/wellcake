@@ -11,7 +11,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	cachev1beta1 "github.com/melancholictheory/wellcake/api/v1beta1"
@@ -30,7 +29,7 @@ func TestPasswordRotationGuards(t *testing.T) {
 			Spec: cachev1beta1.ValkeyClusterSpec{
 				Topology: cachev1beta1.TopologyReplication,
 				Replicas: 3,
-				Auth:     &cachev1beta1.AuthSpec{Enabled: ptr.To(true)},
+				Auth:     &cachev1beta1.AuthSpec{Enabled: new(true)},
 			},
 		}
 		mut(vc)
@@ -42,7 +41,7 @@ func TestPasswordRotationGuards(t *testing.T) {
 		vc   *cachev1beta1.ValkeyCluster
 	}{
 		{"auth disabled", mk(func(vc *cachev1beta1.ValkeyCluster) {
-			vc.Spec.Auth = &cachev1beta1.AuthSpec{Enabled: ptr.To(false)}
+			vc.Spec.Auth = &cachev1beta1.AuthSpec{Enabled: new(false)}
 			vc.Annotations = map[string]string{rotatePasswordAnnotation: "t1"}
 		})},
 		{"existing (user-managed) secret", mk(func(vc *cachev1beta1.ValkeyCluster) {
@@ -86,7 +85,7 @@ func TestPasswordRotationAPIReaderGuard(t *testing.T) {
 		Spec: cachev1beta1.ValkeyClusterSpec{
 			Topology: cachev1beta1.TopologyReplication,
 			Replicas: 3,
-			Auth:     &cachev1beta1.AuthSpec{Enabled: ptr.To(true)},
+			Auth:     &cachev1beta1.AuthSpec{Enabled: new(true)},
 		},
 	}
 	// Authoritative view: token already recorded.

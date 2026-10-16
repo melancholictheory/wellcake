@@ -304,7 +304,7 @@ func TestRenderInitScriptSeedsDefaultUserACL(t *testing.T) {
 	// default user — otherwise an empty aclfile resets default to nopass and
 	// silently overrides requirepass.
 	vc := minimalCR()
-	vc.Spec.Auth = &cachev1beta1.AuthSpec{Enabled: ptr.To(true)}
+	vc.Spec.Auth = &cachev1beta1.AuthSpec{Enabled: new(true)}
 	script := renderInitScript(vc)
 
 	for _, want := range []string{
@@ -337,7 +337,7 @@ func TestRenderInitScriptSeedsSentinelACLUser(t *testing.T) {
 	vc := minimalCR()
 	vc.Spec.Topology = cachev1beta1.TopologySentinel
 	vc.Spec.Sentinel = &cachev1beta1.SentinelSpec{Replicas: 3}
-	vc.Spec.Auth = &cachev1beta1.AuthSpec{Enabled: ptr.To(true)}
+	vc.Spec.Auth = &cachev1beta1.AuthSpec{Enabled: new(true)}
 	script := renderInitScript(vc)
 
 	if !strings.Contains(script, "user sentinel-user on #$PW_HASH &* "+sentinelACLCommands) {
@@ -611,7 +611,7 @@ func TestBuildExporterAuthSecret(t *testing.T) {
 	// Operator-managed auth → generated <name>-auth Secret.
 	gen := minimalCR()
 	gen.Spec.Metrics = &cachev1beta1.MetricsSpec{Enabled: true}
-	gen.Spec.Auth = &cachev1beta1.AuthSpec{Enabled: ptr.To(true)}
+	gen.Spec.Auth = &cachev1beta1.AuthSpec{Enabled: new(true)}
 	if got := passwordSecretRef(buildExporter(gen)); got != "test-auth" {
 		t.Errorf("exporter password secret = %q, want test-auth", got)
 	}
@@ -621,7 +621,7 @@ func TestBuildExporterAuthSecret(t *testing.T) {
 	// becomes Ready — the sec-01-tls-auth regression.
 	ext := minimalCR()
 	ext.Spec.Metrics = &cachev1beta1.MetricsSpec{Enabled: true}
-	ext.Spec.Auth = &cachev1beta1.AuthSpec{Enabled: ptr.To(true), ExistingSecret: "my-auth"}
+	ext.Spec.Auth = &cachev1beta1.AuthSpec{Enabled: new(true), ExistingSecret: "my-auth"}
 	if got := passwordSecretRef(buildExporter(ext)); got != "my-auth" {
 		t.Errorf("exporter password secret = %q, want my-auth (existingSecret)", got)
 	}
@@ -639,13 +639,13 @@ func TestBuildStatefulSetConfigInitGetsAuthPasswordEnv(t *testing.T) {
 	}
 
 	gen := minimalCR()
-	gen.Spec.Auth = &cachev1beta1.AuthSpec{Enabled: ptr.To(true)}
+	gen.Spec.Auth = &cachev1beta1.AuthSpec{Enabled: new(true)}
 	if got := passwordSecretRef(gen); got != "test-auth" {
 		t.Errorf("config-init password secret = %q, want generated test-auth", got)
 	}
 
 	ext := minimalCR()
-	ext.Spec.Auth = &cachev1beta1.AuthSpec{Enabled: ptr.To(true), ExistingSecret: "my-auth"}
+	ext.Spec.Auth = &cachev1beta1.AuthSpec{Enabled: new(true), ExistingSecret: "my-auth"}
 	if got := passwordSecretRef(ext); got != "my-auth" {
 		t.Errorf("config-init password secret = %q, want existingSecret my-auth", got)
 	}
@@ -1147,7 +1147,7 @@ func TestBuildPDBHonoursSpec(t *testing.T) {
 
 	// MinAvailable wins over default MaxUnavailable when set.
 	minVal := intstr.FromInt(2)
-	vc.Spec.PodDisruptionBudget = &cachev1beta1.PDBSpec{Enabled: ptr.To(true), MinAvailable: &minVal}
+	vc.Spec.PodDisruptionBudget = &cachev1beta1.PDBSpec{Enabled: new(true), MinAvailable: &minVal}
 	pdb = buildPDB(vc)
 	if pdb.Spec.MinAvailable == nil || pdb.Spec.MaxUnavailable != nil {
 		t.Errorf("MinAvailable should be set and MaxUnavailable cleared; got min=%v max=%v",
@@ -1169,7 +1169,7 @@ func TestBuildScaleUpJobRebalanceGatedByAutoReshard(t *testing.T) {
 				Topology:    cachev1beta1.TopologyCluster,
 				Image:       "valkey/valkey:9.0",
 				Shards:      ptr.To[int32](6),
-				AutoReshard: ptr.To(auto),
+				AutoReshard: new(auto),
 			},
 			Status: cachev1beta1.ValkeyClusterStatus{LastAppliedReplicas: 3},
 		}
@@ -1202,7 +1202,7 @@ func TestBuildScaleDownJobRebalanceGatedByAutoReshard(t *testing.T) {
 				Topology:    cachev1beta1.TopologyCluster,
 				Image:       "valkey/valkey:9.0",
 				Shards:      ptr.To[int32](3),
-				AutoReshard: ptr.To(auto),
+				AutoReshard: new(auto),
 			},
 			Status: cachev1beta1.ValkeyClusterStatus{LastAppliedReplicas: 6},
 		}
@@ -1506,12 +1506,12 @@ func TestReshardScriptsUseASMFlag(t *testing.T) {
 				Topology:    cachev1beta1.TopologyCluster,
 				Image:       "valkey/valkey:9.1",
 				Shards:      ptr.To[int32](3),
-				AutoReshard: ptr.To(true),
+				AutoReshard: new(true),
 			},
 			Status: cachev1beta1.ValkeyClusterStatus{LastAppliedReplicas: 6},
 		}
 		if perShard {
-			vc.Spec.PerShardWorkload = ptr.To(true)
+			vc.Spec.PerShardWorkload = new(true)
 		}
 		return vc
 	}
@@ -1662,7 +1662,7 @@ func TestPodAndContainerSecurityContextRestrictedDefaults(t *testing.T) {
 	// User-provided contexts replace the defaults verbatim.
 	custom := minimalCR()
 	custom.Spec.PodSecurityContext = &corev1.PodSecurityContext{RunAsUser: ptr.To[int64](2000)}
-	custom.Spec.ContainerSecurityContext = &corev1.SecurityContext{Privileged: ptr.To(true)}
+	custom.Spec.ContainerSecurityContext = &corev1.SecurityContext{Privileged: new(true)}
 	cs := buildStatefulSet(custom, "h", false)
 	if ps := cs.Spec.Template.Spec.SecurityContext; ps == nil || ps.RunAsUser == nil || *ps.RunAsUser != 2000 {
 		t.Errorf("user podSecurityContext not honored: %+v", ps)
@@ -1676,7 +1676,7 @@ func TestPodAndContainerSecurityContextRestrictedDefaults(t *testing.T) {
 
 func TestRenderInitScriptReseedsDefaultUserOnPasswordChange(t *testing.T) {
 	std := minimalCR()
-	std.Spec.Auth = &cachev1beta1.AuthSpec{Enabled: ptr.To(true)}
+	std.Spec.Auth = &cachev1beta1.AuthSpec{Enabled: new(true)}
 	s := renderInitScript(std)
 	for _, want := range []string{
 		`grep -q "^user default on #$PW_HASH "`,                // re-seed unless the line already carries the new hash
@@ -1705,7 +1705,7 @@ func TestRenderReplicationUser(t *testing.T) {
 	mk := func(topo cachev1beta1.Topology) *cachev1beta1.ValkeyCluster {
 		vc := minimalCR()
 		vc.Spec.Topology = topo
-		vc.Spec.Auth = &cachev1beta1.AuthSpec{Enabled: ptr.To(true)}
+		vc.Spec.Auth = &cachev1beta1.AuthSpec{Enabled: new(true)}
 		if topo == cachev1beta1.TopologyCluster {
 			vc.Spec.Shards = ptr.To[int32](3)
 		}
@@ -1784,7 +1784,7 @@ func TestManagedNonDefaultUsersAndReserved(t *testing.T) {
 
 func TestRenderInitScriptIsValidShell(t *testing.T) {
 	std := minimalCR()
-	std.Spec.Auth = &cachev1beta1.AuthSpec{Enabled: ptr.To(true)}
+	std.Spec.Auth = &cachev1beta1.AuthSpec{Enabled: new(true)}
 	cl := minimalCR()
 	cl.Spec.Topology = cachev1beta1.TopologyCluster
 	cl.Spec.Shards = ptr.To[int32](3)
