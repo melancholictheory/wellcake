@@ -63,3 +63,37 @@ func TestSentinelViewCountsStaleReplicas(t *testing.T) {
 		t.Errorf("sentinelView = %+v", v)
 	}
 }
+
+func TestMisplacedDataPod(t *testing.T) {
+	ordinalOf := func(h string) (int32, bool) {
+		switch h {
+		case "s-1.s-headless.ns.svc.cluster.local", "10.0.0.11":
+			return 1, true
+		case "s-0.s-headless.ns.svc.cluster.local":
+			return 0, true
+		}
+		return 0, false
+	}
+	replica := func(ord int32, of string) podRole {
+		return podRole{ordinal: ord, reachable: true, role: roleSlave, masterHost: of}
+	}
+	master := podRole{ordinal: 1, reachable: true, role: roleMaster}
+	cases := []struct {
+		name   string
+		survey []podRole
+		want   int
+	}{
+		{"replicas by name and by IP", []podRole{replica(0, "s-1.s-headless.ns.svc.cluster.local"), master, replica(2, "10.0.0.11")}, -1},
+		{"replica chained behind another", []podRole{replica(0, "s-1.s-headless.ns.svc.cluster.local"), master, replica(2, "s-0.s-headless.ns.svc.cluster.local")}, 2},
+		{"a second primary", []podRole{{ordinal: 0, reachable: true, role: roleMaster}, master, replica(2, "10.0.0.11")}, 0},
+		{"replica of an address no pod has", []podRole{replica(0, "10.0.0.99"), master, replica(2, "10.0.0.11")}, 0},
+		{"unreachable pods are left alone", []podRole{{ordinal: 0}, master, replica(2, "10.0.0.11")}, -1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := misplacedDataPod(tc.survey, 1, ordinalOf); got != tc.want {
+				t.Errorf("misplacedDataPod = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}

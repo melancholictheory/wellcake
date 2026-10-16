@@ -17,6 +17,13 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   runs `SENTINEL RESET` on one Sentinel that has such entries, then waits for it
   to find its peers again before the next one. The manual reset from the 0.12.0
   upgrade notes is no longer needed.
+- In the Sentinel topology the operator now repairs a data pod that replicates
+  from something other than the Sentinels' master, for example a replica
+  chained behind another replica. Sentinel never sees such a pod, so it would
+  never fail over to it. Once every data pod is ready and the Sentinels agree on
+  a master that answers as one, the operator points the stray pod at that
+  master and runs `CONFIG REWRITE`, one pod per pass. A healthy Sentinel cluster
+  is now rechecked every minute, since this drift raises no watch event.
 
 ## [0.12.0]
 
