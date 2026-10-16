@@ -150,7 +150,7 @@ func TestReconcileReplicationCreatesOwnedObjects(t *testing.T) {
 			Topology: cachev1beta1.TopologyReplication,
 			Profile:  cachev1beta1.ProfileCache,
 			Replicas: 3,
-			Auth:     &cachev1beta1.AuthSpec{Enabled: ptr.To(true)},
+			Auth:     &cachev1beta1.AuthSpec{Enabled: new(true)},
 		},
 	}
 	c := fake.NewClientBuilder().
@@ -317,7 +317,7 @@ func TestReconcileBackupCreatesCronJob(t *testing.T) {
 		Spec: cachev1beta1.ValkeyClusterSpec{
 			Topology: cachev1beta1.TopologyReplication,
 			Replicas: 3,
-			Auth:     &cachev1beta1.AuthSpec{Enabled: ptr.To(true)},
+			Auth:     &cachev1beta1.AuthSpec{Enabled: new(true)},
 			Backup: &cachev1beta1.BackupSpec{
 				Enabled:  true,
 				Schedule: "0 3 * * *",
@@ -479,7 +479,7 @@ func TestClusterBackupPerShardHosts(t *testing.T) {
 		Spec: cachev1beta1.ValkeyClusterSpec{
 			Topology:         cachev1beta1.TopologyCluster,
 			Shards:           &shards,
-			PerShardWorkload: ptr.To(true),
+			PerShardWorkload: new(true),
 			Backup: &cachev1beta1.BackupSpec{
 				Enabled: true, Schedule: "0 3 * * *", Retention: ptr.To[int32](7),
 				S3: &cachev1beta1.S3Spec{Bucket: "bkt", Region: "r", CredentialsSecret: "c"},
@@ -513,7 +513,7 @@ func TestReconcileDisablingBackupDeletesCronJob(t *testing.T) {
 		Spec: cachev1beta1.ValkeyClusterSpec{
 			Topology: cachev1beta1.TopologyReplication,
 			Replicas: 1,
-			Auth:     &cachev1beta1.AuthSpec{Enabled: ptr.To(true)},
+			Auth:     &cachev1beta1.AuthSpec{Enabled: new(true)},
 		},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(vc, cron).
@@ -650,12 +650,12 @@ func TestMapSecretToCluster(t *testing.T) {
 		}
 	}
 	authExt := func() *cachev1beta1.AuthSpec {
-		return &cachev1beta1.AuthSpec{Enabled: ptr.To(true), ExistingSecret: "shared-auth"}
+		return &cachev1beta1.AuthSpec{Enabled: new(true), ExistingSecret: "shared-auth"}
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(
 		mkVC("c1", authExt(), nil),                                                       // references shared-auth
 		mkVC("c2", authExt(), nil),                                                       // also references shared-auth
-		mkVC("c3", &cachev1beta1.AuthSpec{Enabled: ptr.To(true)}, nil),                   // generated secret, no existingSecret
+		mkVC("c3", &cachev1beta1.AuthSpec{Enabled: new(true)}, nil),                      // generated secret, no existingSecret
 		mkVC("c4", nil, &cachev1beta1.TLSSpec{Enabled: true, ExistingSecret: "tls-ext"}), // TLS existingSecret
 	).Build()
 	r := &ValkeyClusterReconciler{Client: c, Scheme: scheme}

@@ -16,7 +16,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -284,7 +283,7 @@ func TestEnsurePDBSkipsNoOpAndSwitchesBudget(t *testing.T) {
 	// switch maxUnavailable -> minAvailable: DeepDerivative sees the newly-set
 	// pointer and must update.
 	mn := intstr.FromInt32(2)
-	vc.Spec.PodDisruptionBudget = &cachev1beta1.PDBSpec{Enabled: ptr.To(true), MinAvailable: &mn}
+	vc.Spec.PodDisruptionBudget = &cachev1beta1.PDBSpec{Enabled: new(true), MinAvailable: &mn}
 	if err := r.ensurePDB(context.Background(), vc); err != nil {
 		t.Fatalf("switch ensurePDB: %v", err)
 	}

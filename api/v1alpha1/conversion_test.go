@@ -27,13 +27,13 @@ func TestValkeyClusterConversionRoundTrip(t *testing.T) {
 			Replicas:         3,
 			Shards:           ptr.To[int32](3),
 			ReplicasPerShard: ptr.To[int32](1),
-			PerShardWorkload: ptr.To(true), // must survive round-trip (public composition writes v1alpha1)
-			Auth:             &AuthSpec{Enabled: ptr.To(true), ExistingSecret: "s"},
+			PerShardWorkload: new(true), // must survive round-trip (public composition writes v1alpha1)
+			Auth:             &AuthSpec{Enabled: new(true), ExistingSecret: "s"},
 			Logging:          &LoggingSpec{Format: "json"}, // guards the v1alpha1/v1beta1 json-tag parity
 			// Explicit false/0 on fields whose CRD default differs: the JSON
 			// round trip must keep them apart from "unset" (nil).
-			AutoReshard:         ptr.To(false),
-			PodDisruptionBudget: &PDBSpec{Enabled: ptr.To(false)},
+			AutoReshard:         new(false),
+			PodDisruptionBudget: &PDBSpec{Enabled: new(false)},
 			Backup:              &BackupSpec{Retention: ptr.To[int32](0), S3: &S3Spec{Bucket: "b", CredentialsSecret: "c"}},
 		},
 		Status: ValkeyClusterStatus{Phase: "Ready", ReadyReplicas: 6, ClusterInitialized: true},

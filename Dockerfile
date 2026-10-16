@@ -3,7 +3,7 @@
 # cross-compile to the target platform via GOOS/GOARCH. The build is
 # CGO_ENABLED=0, so this avoids running the Go toolchain under QEMU emulation
 # for a non-native target arch (e.g. arm64 on an amd64 runner) — much faster.
-ARG GOLANG_IMAGE=golang:1.25
+ARG GOLANG_IMAGE=golang:1.26
 FROM --platform=${BUILDPLATFORM} ${GOLANG_IMAGE} AS builder
 ARG TARGETOS
 ARG TARGETARCH

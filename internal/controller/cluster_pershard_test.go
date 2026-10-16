@@ -20,7 +20,7 @@ func perShardCR() *cachev1beta1.ValkeyCluster {
 	vc.Spec.Topology = cachev1beta1.TopologyCluster
 	vc.Spec.Shards = ptr.To[int32](3)
 	vc.Spec.ReplicasPerShard = ptr.To[int32](1)
-	vc.Spec.PerShardWorkload = ptr.To(true)
+	vc.Spec.PerShardWorkload = new(true)
 	return vc
 }
 
@@ -32,7 +32,7 @@ func TestPerShardEnabled(t *testing.T) {
 	}{
 		{"cluster + flag true", func(vc *cachev1beta1.ValkeyCluster) {}, true},
 		{"flag nil", func(vc *cachev1beta1.ValkeyCluster) { vc.Spec.PerShardWorkload = nil }, false},
-		{"flag false", func(vc *cachev1beta1.ValkeyCluster) { vc.Spec.PerShardWorkload = ptr.To(false) }, false},
+		{"flag false", func(vc *cachev1beta1.ValkeyCluster) { vc.Spec.PerShardWorkload = new(false) }, false},
 		{"non-cluster", func(vc *cachev1beta1.ValkeyCluster) { vc.Spec.Topology = cachev1beta1.TopologyReplication }, false},
 	}
 	for _, tc := range cases {

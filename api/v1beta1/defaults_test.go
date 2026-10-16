@@ -20,10 +20,10 @@ func TestOptionalFieldAccessors(t *testing.T) {
 	}{
 		{"auth block absent", (&ValkeyClusterSpec{}).AuthEnabled(), false},
 		{"auth.enabled unset", (&ValkeyClusterSpec{Auth: &AuthSpec{}}).AuthEnabled(), true},
-		{"auth.enabled false", (&ValkeyClusterSpec{Auth: &AuthSpec{Enabled: ptr.To(false)}}).AuthEnabled(), false},
-		{"auth.enabled true", (&ValkeyClusterSpec{Auth: &AuthSpec{Enabled: ptr.To(true)}}).AuthEnabled(), true},
+		{"auth.enabled false", (&ValkeyClusterSpec{Auth: &AuthSpec{Enabled: new(false)}}).AuthEnabled(), false},
+		{"auth.enabled true", (&ValkeyClusterSpec{Auth: &AuthSpec{Enabled: new(true)}}).AuthEnabled(), true},
 		{"autoReshard unset", (&ValkeyClusterSpec{}).AutoReshardEnabled(), true},
-		{"autoReshard false", (&ValkeyClusterSpec{AutoReshard: ptr.To(false)}).AutoReshardEnabled(), false},
+		{"autoReshard false", (&ValkeyClusterSpec{AutoReshard: new(false)}).AutoReshardEnabled(), false},
 		{"retention unset", (&BackupSpec{}).RetentionCount(), int32(7)},
 		{"retention 0", (&BackupSpec{Retention: ptr.To[int32](0)}).RetentionCount(), int32(0)},
 		{"retention 3", (&BackupSpec{Retention: ptr.To[int32](3)}).RetentionCount(), int32(3)},
