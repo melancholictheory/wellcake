@@ -917,14 +917,23 @@ query_sentinels() {
   BEST_EPOCH=-1
   BEST_HOST=""
   BEST_PORT=""
+  # The Sentinel count is not rendered here: it would put spec.sentinel.replicas
+  # in the pod template and roll the data pods on every Sentinel scale. Start
+  # at the CRD minimum and raise the bound to what the Sentinels report.
   i=0
-  while [ "$i" -lt %[3]d ]; do
-    OUT=$(timeout 3 valkey-cli -h "$SEN-$i.$SEN" -p %[4]d%[5]s%[6]s SENTINEL MASTER %[7]s 2>/dev/null || true)
-    set -- $(printf '%%s\n' "$OUT" | awk 'NR %% 2 == 1 { k = $0 } NR %% 2 == 0 { v[k] = $0 } END { if (v["ip"] != "" && v["config-epoch"] ~ /^[0-9]+$/) print v["ip"], v["port"], v["config-epoch"] }')
-    if [ "$#" -eq 3 ] && [ "$3" -gt "$BEST_EPOCH" ]; then
-      BEST_HOST=$1
-      BEST_PORT=$2
-      BEST_EPOCH=$3
+  n=3
+  while [ "$i" -lt "$n" ]; do
+    OUT=$(timeout 3 valkey-cli -h "$SEN-$i.$SEN" -p %[3]d%[4]s%[5]s SENTINEL MASTER %[6]s 2>/dev/null || true)
+    set -- $(printf '%%s\n' "$OUT" | awk 'NR %% 2 == 1 { k = $0 } NR %% 2 == 0 { v[k] = $0 } END { if (v["ip"] != "" && v["config-epoch"] ~ /^[0-9]+$/ && v["num-other-sentinels"] ~ /^[0-9]+$/) print v["ip"], v["port"], v["config-epoch"], v["num-other-sentinels"] }')
+    if [ "$#" -eq 4 ]; then
+      if [ "$(($4 + 1))" -gt "$n" ]; then
+        n=$(($4 + 1))
+      fi
+      if [ "$3" -gt "$BEST_EPOCH" ]; then
+        BEST_HOST=$1
+        BEST_PORT=$2
+        BEST_EPOCH=$3
+      fi
     fi
     i=$((i + 1))
   done
@@ -933,24 +942,24 @@ is_self() {
   [ "$1" = "$SELF" ] || hostname -i 2>/dev/null | tr ' ' '\n' | grep -qxF "$1"
 }
 is_primary() {
-  [ "$(timeout 3 valkey-cli -h "$1" -p "$2"%[5]s%[6]s ROLE 2>/dev/null | head -n 1)" = master ]
+  [ "$(timeout 3 valkey-cli -h "$1" -p "$2"%[4]s%[5]s ROLE 2>/dev/null | head -n 1)" = master ]
 }
 # The Sentinels report a primary by IP until a failover promotes a pod that
 # announces its name. Follow the pod's name instead, so the link survives that
-# pod getting a new IP.
+# pod getting a new IP. The primary tells its own name (replica-announce-ip);
+# it is kept only when it is one of our pods and resolves to that IP.
 name_of_best() {
-  j=0
-  while [ "$j" -lt %[8]d ]; do
-    NAME="%[9]s-$j.%[1]s.${POD_NAMESPACE}.svc.cluster.local"
-    if getent hosts "$NAME" 2>/dev/null | awk '{ print $1 }' | grep -qxF "$BEST_HOST"; then
-      BEST_HOST=$NAME
-      return
-    fi
-    j=$((j + 1))
-  done
+  NAME=$(timeout 3 valkey-cli -h "$BEST_HOST" -p "$BEST_PORT"%[4]s%[5]s CONFIG GET replica-announce-ip 2>/dev/null | sed -n 2p)
+  case "$NAME" in
+    %[7]s-*.%[1]s.${POD_NAMESPACE}.svc.cluster.local) ;;
+    *) return ;;
+  esac
+  if getent hosts "$NAME" 2>/dev/null | awk '{ print $1 }' | grep -qxF "$BEST_HOST"; then
+    BEST_HOST=$NAME
+  fi
 }
-`, headlessServiceName(vc), sentinelStatefulSetName(vc), vc.Spec.Sentinel.Replicas, sentinelListenPort(vc),
-		tlsArgs, auth, sentinelMasterName, vc.Spec.Replicas, statefulSetName(vc))
+`, headlessServiceName(vc), sentinelStatefulSetName(vc), sentinelListenPort(vc),
+		tlsArgs, auth, sentinelMasterName, statefulSetName(vc))
 }
 
 // sentinelPrimaryGuardActive reports whether the data container starts through

@@ -41,7 +41,9 @@ func runSentinelDataRole(t *testing.T, vc *cachev1beta1.ValkeyCluster, hostname,
 	for _, h := range primaries {
 		fmt.Fprintf(&cli, "    %s) echo master; exit 0 ;;\n", h)
 	}
-	fmt.Fprintf(&cli, "  esac\n  exit 1\nfi\nn=$(cat %[1]s 2>/dev/null || echo 0)\necho $((n + 1)) > %[1]s\n", filepath.Join(dir, "calls"))
+	fmt.Fprintf(&cli, "  esac\n  exit 1\nfi\n"+
+		"if [ \"$last\" = replica-announce-ip ]; then\n  [ \"$2\" = 10.0.0.32 ] && printf 'replica-announce-ip\\ns-2.s-headless.ns.svc.cluster.local\\n'\n  exit 0\nfi\n"+
+		"n=$(cat %[1]s 2>/dev/null || echo 0)\necho $((n + 1)) > %[1]s\n", filepath.Join(dir, "calls"))
 	writeReplies := func(replies map[string]string) {
 		cli.WriteString("case \"$2\" in\n")
 		for host, reply := range replies {
@@ -88,7 +90,7 @@ func TestSentinelDataPodsFollowTheSentinels(t *testing.T) {
 	}
 	fqdn := func(pod string) string { return pod + ".s-headless.ns.svc.cluster.local" }
 	master := func(host string, epoch int) string {
-		return fmt.Sprintf("name mymaster ip %s port 6379 config-epoch %d", host, epoch)
+		return fmt.Sprintf("name mymaster ip %s port 6379 config-epoch %d num-other-sentinels 2", host, epoch)
 	}
 	agree := func(host string) map[string]string {
 		return map[string]string{

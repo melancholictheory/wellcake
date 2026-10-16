@@ -16,6 +16,16 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- In the Sentinel topology a scale no longer restarts every pod (#77). Since
+  0.12.0 the data pods' startup script held `spec.replicas` and
+  `spec.sentinel.replicas` as loop bounds, so changing either one changed the
+  pod template and the StatefulSet rolled every data pod, the primary included,
+  with a failover each time. The Sentinel init script did the same with
+  `spec.sentinel.replicas`. The scripts now start from three Sentinels and
+  follow the count the Sentinels report (`num-other-sentinels`), and a data pod
+  gets the primary's DNS name from the primary itself
+  (`CONFIG GET replica-announce-ip`, kept only when it resolves to that IP). The
+  upgrade to this release rolls the pods once.
 - In the Sentinel topology the operator now cleans up dead Sentinel entries
   (#62). A Sentinel that came back with a new ID (an older operator, or a lost
   volume) left the others counting a dead peer, which raises the majority a

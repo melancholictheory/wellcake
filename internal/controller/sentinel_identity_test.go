@@ -81,7 +81,7 @@ func TestSentinelInitKeepsIdentityAndFollowsPeers(t *testing.T) {
 		},
 	}
 	master := func(ip string, epoch int) string {
-		return fmt.Sprintf("name mymaster ip %s port 6379 config-epoch %d", ip, epoch)
+		return fmt.Sprintf("name mymaster ip %s port 6379 config-epoch %d num-other-sentinels 2", ip, epoch)
 	}
 	old := "port 26379\nsentinel myid 0123456789abcdef0123456789abcdef01234567\nsentinel current-epoch 7\nsentinel monitor mymaster 10.0.0.9 6379 2\n"
 

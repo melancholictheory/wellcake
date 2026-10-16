@@ -663,28 +663,36 @@ ME="${HOSTNAME##*-}"
 BEST_EPOCH=-1
 BEST_HOST=""
 BEST_PORT=""
+# The Sentinel count is not rendered here, so a Sentinel scale does not roll the
+# Sentinels: start at the CRD minimum and raise it to what the others report.
 i=0
-while [ "$i" -lt %[4]d ]; do
+n=3
+while [ "$i" -lt "$n" ]; do
   if [ "$i" != "$ME" ]; then
-    OUT=$(timeout 3 valkey-cli -h "$STS-$i.$STS" -p %[5]d%[6]s%[7]s SENTINEL MASTER %[8]s 2>/dev/null || true)
+    OUT=$(timeout 3 valkey-cli -h "$STS-$i.$STS" -p %[4]d%[5]s%[6]s SENTINEL MASTER %[7]s 2>/dev/null || true)
     set -- $(printf '%%s
-' "$OUT" | awk 'NR %% 2 == 1 { k = $0 } NR %% 2 == 0 { v[k] = $0 } END { if (v["ip"] != "" && v["config-epoch"] ~ /^[0-9]+$/) print v["ip"], v["port"], v["config-epoch"] }')
-    if [ "$#" -eq 3 ] && [ "$3" -gt "$BEST_EPOCH" ]; then
-      BEST_HOST=$1
-      BEST_PORT=$2
-      BEST_EPOCH=$3
+' "$OUT" | awk 'NR %% 2 == 1 { k = $0 } NR %% 2 == 0 { v[k] = $0 } END { if (v["ip"] != "" && v["config-epoch"] ~ /^[0-9]+$/ && v["num-other-sentinels"] ~ /^[0-9]+$/) print v["ip"], v["port"], v["config-epoch"], v["num-other-sentinels"] }')
+    if [ "$#" -eq 4 ]; then
+      if [ "$(($4 + 1))" -gt "$n" ]; then
+        n=$(($4 + 1))
+      fi
+      if [ "$3" -gt "$BEST_EPOCH" ]; then
+        BEST_HOST=$1
+        BEST_PORT=$2
+        BEST_EPOCH=$3
+      fi
     fi
   fi
   i=$((i + 1))
 done
 if [ -n "$BEST_HOST" ]; then
   echo "monitoring $BEST_HOST:$BEST_PORT (config-epoch $BEST_EPOCH) as reported by the other Sentinels"
-  awk -v h="$BEST_HOST" -v p="$BEST_PORT" '$1 == "sentinel" && $2 == "monitor" && $3 == "%[8]s" { $4 = h; $5 = p } { print }' "$NEW" > "$NEW.m"
+  awk -v h="$BEST_HOST" -v p="$BEST_PORT" '$1 == "sentinel" && $2 == "monitor" && $3 == "%[7]s" { $4 = h; $5 = p } { print }' "$NEW" > "$NEW.m"
   mv "$NEW.m" "$NEW"
-  echo "sentinel config-epoch %[8]s $BEST_EPOCH" >> "$NEW"
+  echo "sentinel config-epoch %[7]s $BEST_EPOCH" >> "$NEW"
 fi
 mv "$NEW" "$RT"
-`, dataMountPath, sentinelConfigName, sentinelStatefulSetName(vc), vc.Spec.Sentinel.Replicas,
+`, dataMountPath, sentinelConfigName, sentinelStatefulSetName(vc),
 		sentinelListenPort(vc), tlsArgs, auth, sentinelMasterName)
 }
 
