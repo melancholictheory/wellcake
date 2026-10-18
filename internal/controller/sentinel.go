@@ -440,6 +440,13 @@ func buildSentinelStatefulSet(vc *cachev1beta1.ValkeyCluster, proactive bool) *a
 	if vc.Spec.Storage != nil && vc.Spec.Storage.StorageClassName != nil {
 		pvc.Spec.StorageClassName = vc.Spec.Storage.StorageClassName
 	}
+	sentinelEnv := []corev1.EnvVar(nil)
+	if tlsEnabled(vc) && vc.Spec.AuthEnabled() {
+		sentinelEnv = append(sentinelEnv, corev1.EnvVar{
+			Name:      envRedisCLIAuth,
+			ValueFrom: secretRef(authSecretName(vc), secretKeyPassword),
+		})
+	}
 
 	return &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
@@ -477,9 +484,10 @@ func buildSentinelStatefulSet(vc *cachev1beta1.ValkeyCluster, proactive bool) *a
 							Protocol:      corev1.ProtocolTCP,
 						}},
 						Resources:       vc.Spec.Sentinel.Resources,
+						Env:             sentinelEnv,
 						VolumeMounts:    volumeMounts,
-						ReadinessProbe:  tcpProbe(port, 5, 5),
-						LivenessProbe:   tcpProbe(port, 15, 20),
+						ReadinessProbe:  valkeyProbe(vc, port, 5, 5),
+						LivenessProbe:   valkeyProbe(vc, port, 15, 20),
 						SecurityContext: containerSecurityContext(vc),
 					}},
 					Volumes:                   volumes,

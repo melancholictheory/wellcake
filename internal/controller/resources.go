@@ -82,6 +82,7 @@ const (
 	gossipPortName      = "gossip"
 	backupVolumeName    = "backup"
 	envValkeyPassword   = "VALKEY_PASSWORD"
+	envRedisCLIAuth     = "REDISCLI_AUTH"
 	envAWSAccessKey     = "AWS_ACCESS_KEY_ID"
 	envAWSSecretKey     = "AWS_SECRET_ACCESS_KEY"
 	envAWSDefaultRegion = "AWS_DEFAULT_REGION"
@@ -1218,6 +1219,12 @@ func buildStatefulSet(vc *cachev1beta1.ValkeyCluster, configHash string, proacti
 	valkeyCommand := []string{"valkey-server"}
 	valkeyArgs := []string{dataMountPath + "/runtime.conf"}
 	valkeyEnv := envVars
+	if tlsEnabled(vc) && vc.Spec.AuthEnabled() {
+		valkeyEnv = append(valkeyEnv, corev1.EnvVar{
+			Name:      envRedisCLIAuth,
+			ValueFrom: secretRef(authSecretName(vc), secretKeyPassword),
+		})
+	}
 	if sentinelPrimaryGuardActive(vc) {
 		valkeyCommand = []string{shellCmd, "-c", renderSentinelPrimaryGuard(vc)}
 		valkeyArgs = nil
@@ -1241,8 +1248,8 @@ func buildStatefulSet(vc *cachev1beta1.ValkeyCluster, configHash string, proacti
 			{Name: configVolumeName, MountPath: configMountPath, ReadOnly: true},
 			{Name: dataVolumeName, MountPath: dataMountPath},
 		},
-		ReadinessProbe: tcpProbe(port, 5, 5),
-		LivenessProbe:  tcpProbe(port, 15, 20),
+		ReadinessProbe: valkeyProbe(vc, port, 5, 5),
+		LivenessProbe:  valkeyProbe(vc, port, 15, 20),
 	}
 	if tlsEnabled(vc) {
 		valkeyContainer.VolumeMounts = append(valkeyContainer.VolumeMounts, corev1.VolumeMount{
@@ -1680,11 +1687,22 @@ func defaultAntiAffinity(vc *cachev1beta1.ValkeyCluster) *corev1.Affinity {
 	}
 }
 
-func tcpProbe(port int32, initial, period int32) *corev1.Probe {
+func valkeyProbe(vc *cachev1beta1.ValkeyCluster, port, initial, period int32) *corev1.Probe {
+	handler := corev1.ProbeHandler{
+		TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromInt32(port)},
+	}
+	if tlsEnabled(vc) {
+		handler = corev1.ProbeHandler{Exec: &corev1.ExecAction{Command: []string{
+			"valkey-cli",
+			"--tls",
+			"--cacert", tlsMountPath + "/" + secretKeyTLSCACert,
+			"--cert", tlsMountPath + "/" + secretKeyTLSCert,
+			"--key", tlsMountPath + "/" + secretKeyTLSKey,
+			"PING",
+		}}}
+	}
 	return &corev1.Probe{
-		ProbeHandler: corev1.ProbeHandler{
-			TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromInt32(port)},
-		},
+		ProbeHandler:        handler,
 		InitialDelaySeconds: initial,
 		PeriodSeconds:       period,
 		TimeoutSeconds:      3,

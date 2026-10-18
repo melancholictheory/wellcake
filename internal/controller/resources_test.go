@@ -49,6 +49,39 @@ func minimalCR() *cachev1beta1.ValkeyCluster {
 	}
 }
 
+func TestTLSValkeyProbesUseCLIAndManagedAuth(t *testing.T) {
+	vc := minimalCR()
+	vc.Spec.TLS = &cachev1beta1.TLSSpec{Enabled: true}
+	vc.Spec.Auth = &cachev1beta1.AuthSpec{Enabled: new(true)}
+
+	container := buildStatefulSet(vc, "", false).Spec.Template.Spec.Containers[0]
+	for name, probe := range map[string]*corev1.Probe{
+		"readiness": container.ReadinessProbe,
+		"liveness":  container.LivenessProbe,
+	} {
+		if probe == nil || probe.Exec == nil {
+			t.Errorf("%s probe = %+v, want an exec probe", name, probe)
+			continue
+		}
+		command := strings.Join(probe.Exec.Command, " ")
+		for _, want := range []string{"valkey-cli", "--tls", "--cacert " + tlsMountPath + "/ca.crt", "PING"} {
+			if !strings.Contains(command, want) {
+				t.Errorf("%s probe command %q missing %q", name, command, want)
+			}
+		}
+	}
+
+	for _, env := range container.Env {
+		if env.Name == envRedisCLIAuth {
+			if env.ValueFrom == nil || env.ValueFrom.SecretKeyRef == nil || env.ValueFrom.SecretKeyRef.Name != authSecretName(vc) || env.ValueFrom.SecretKeyRef.Key != secretKeyPassword {
+				t.Errorf("%s = %+v, want auth secret reference", envRedisCLIAuth, env)
+			}
+			return
+		}
+	}
+	t.Errorf("container is missing %s", envRedisCLIAuth)
+}
+
 func TestApplyDefaults(t *testing.T) {
 	tests := []struct {
 		name          string

@@ -212,6 +212,7 @@ func TestSentinelServesOnTLSPort(t *testing.T) {
 	for _, tlsOn := range []bool{false, true} {
 		vc := sentinelCR()
 		vc.Spec.TLS = &cachev1beta1.TLSSpec{Enabled: tlsOn}
+		vc.Spec.Auth = &cachev1beta1.AuthSpec{Enabled: new(true)}
 		want := int32(26379)
 		if tlsOn {
 			want = 26380
@@ -237,8 +238,27 @@ func TestSentinelServesOnTLSPort(t *testing.T) {
 			return 0
 		}
 		for name, p := range map[string]*corev1.Probe{"readiness": c.ReadinessProbe, "liveness": c.LivenessProbe} {
-			if p == nil || p.TCPSocket == nil || resolve(p.TCPSocket.Port) != want {
+			if p == nil {
+				t.Errorf("tls=%v: %s probe is missing", tlsOn, name)
+				continue
+			}
+			if tlsOn {
+				if p.Exec == nil || !strings.Contains(strings.Join(p.Exec.Command, " "), "valkey-cli --tls") {
+					t.Errorf("tls=%v: %s probe must run a TLS-aware valkey-cli PING, got %+v", tlsOn, name, p)
+				}
+			} else if p.TCPSocket == nil || resolve(p.TCPSocket.Port) != want {
 				t.Errorf("tls=%v: %s probe must dial %d, got %+v", tlsOn, name, want, p)
+			}
+		}
+		if tlsOn {
+			foundAuth := false
+			for _, env := range c.Env {
+				if env.Name == envRedisCLIAuth {
+					foundAuth = env.ValueFrom != nil && env.ValueFrom.SecretKeyRef != nil && env.ValueFrom.SecretKeyRef.Name == authSecretName(vc)
+				}
+			}
+			if !foundAuth {
+				t.Errorf("TLS Sentinel must receive %s from the managed auth Secret", envRedisCLIAuth)
 			}
 		}
 
