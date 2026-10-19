@@ -82,7 +82,6 @@ const (
 	gossipPortName      = "gossip"
 	backupVolumeName    = "backup"
 	envValkeyPassword   = "VALKEY_PASSWORD"
-	envRedisCLIAuth     = "REDISCLI_AUTH"
 	envAWSAccessKey     = "AWS_ACCESS_KEY_ID"
 	envAWSSecretKey     = "AWS_SECRET_ACCESS_KEY"
 	envAWSDefaultRegion = "AWS_DEFAULT_REGION"
@@ -1219,12 +1218,6 @@ func buildStatefulSet(vc *cachev1beta1.ValkeyCluster, configHash string, proacti
 	valkeyCommand := []string{"valkey-server"}
 	valkeyArgs := []string{dataMountPath + "/runtime.conf"}
 	valkeyEnv := envVars
-	if tlsEnabled(vc) && vc.Spec.AuthEnabled() {
-		valkeyEnv = append(valkeyEnv, corev1.EnvVar{
-			Name:      envRedisCLIAuth,
-			ValueFrom: secretRef(authSecretName(vc), secretKeyPassword),
-		})
-	}
 	if sentinelPrimaryGuardActive(vc) {
 		valkeyCommand = []string{shellCmd, "-c", renderSentinelPrimaryGuard(vc)}
 		valkeyArgs = nil
@@ -1691,11 +1684,15 @@ func valkeyProbe(vc *cachev1beta1.ValkeyCluster, port, initial, period int32) *c
 	handler := corev1.ProbeHandler{
 		TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromInt32(port)},
 	}
+	// A TCP probe on a TLS port makes Valkey log a failed handshake on every
+	// check. PING over TLS instead. --insecure keeps the probe about the server
+	// being up: an expired certificate must not restart every pod at once.
+	// valkey-cli exits 0 on an error reply (NOAUTH, LOADING), so no password is
+	// needed. The cert and key answer a mutual-TLS client certificate request.
 	if tlsEnabled(vc) {
 		handler = corev1.ProbeHandler{Exec: &corev1.ExecAction{Command: []string{
-			"valkey-cli",
-			"--tls",
-			"--cacert", tlsMountPath + "/" + secretKeyTLSCACert,
+			"valkey-cli", "-p", strconv.Itoa(int(port)),
+			"--tls", "--insecure",
 			"--cert", tlsMountPath + "/" + secretKeyTLSCert,
 			"--key", tlsMountPath + "/" + secretKeyTLSKey,
 			"PING",

@@ -49,7 +49,7 @@ func minimalCR() *cachev1beta1.ValkeyCluster {
 	}
 }
 
-func TestTLSValkeyProbesUseCLIAndManagedAuth(t *testing.T) {
+func TestTLSValkeyProbesPingOverTLS(t *testing.T) {
 	vc := minimalCR()
 	vc.Spec.TLS = &cachev1beta1.TLSSpec{Enabled: true}
 	vc.Spec.Auth = &cachev1beta1.AuthSpec{Enabled: new(true)}
@@ -64,22 +64,19 @@ func TestTLSValkeyProbesUseCLIAndManagedAuth(t *testing.T) {
 			continue
 		}
 		command := strings.Join(probe.Exec.Command, " ")
-		for _, want := range []string{"valkey-cli", "--tls", "--cacert " + tlsMountPath + "/ca.crt", "PING"} {
+		// The TLS port, not valkey-cli's default 6379 (closed with TLS on), and
+		// no certificate verification, so an expired cert does not fail liveness.
+		for _, want := range []string{"valkey-cli -p 6380 --tls --insecure", "--cert " + tlsMountPath + "/tls.crt", "PING"} {
 			if !strings.Contains(command, want) {
 				t.Errorf("%s probe command %q missing %q", name, command, want)
 			}
 		}
 	}
-
 	for _, env := range container.Env {
-		if env.Name == envRedisCLIAuth {
-			if env.ValueFrom == nil || env.ValueFrom.SecretKeyRef == nil || env.ValueFrom.SecretKeyRef.Name != authSecretName(vc) || env.ValueFrom.SecretKeyRef.Key != secretKeyPassword {
-				t.Errorf("%s = %+v, want auth secret reference", envRedisCLIAuth, env)
-			}
-			return
+		if env.Name == "REDISCLI_AUTH" {
+			t.Errorf("probe needs no password, got %s in the container env", env.Name)
 		}
 	}
-	t.Errorf("container is missing %s", envRedisCLIAuth)
 }
 
 func TestApplyDefaults(t *testing.T) {

@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims to
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- With TLS on, the readiness and liveness probes of the data pods and the
+  Sentinels no longer make Valkey log `SSL routines::unexpected eof while
+  reading` every few seconds (#80). They were TCP checks, which close the
+  connection before the TLS handshake. They now run `valkey-cli PING` over TLS
+  on the TLS port. The probe skips certificate verification, so an expired
+  certificate does not restart every pod at once, and it needs no password.
+  The pod template changes, so TLS clusters roll once on upgrade.
+
 ## [0.12.1]
 
 ### Changed
