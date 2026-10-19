@@ -6,6 +6,12 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Build: golangci-lint 2.14.0 (was 2.11.4), so `make lint` also builds and
+  runs on Go 1.27. Two `ctrl.Result{Requeue: true}`, deprecated in
+  controller-runtime, now use `RequeueAfter`.
+
 ### Fixed
 
 - With TLS on, the readiness and liveness probes of the data pods and the

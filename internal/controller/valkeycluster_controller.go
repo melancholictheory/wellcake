@@ -129,7 +129,7 @@ func (r *ValkeyClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	if rotated, err := r.reconcilePasswordRotation(ctx, &vc); err != nil {
 		return ctrl.Result{}, err
 	} else if rotated {
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{RequeueAfter: time.Second}, nil
 	}
 
 	// In-place TLS cert reload (cert-manager renewal): re-read the renewed cert
@@ -138,7 +138,7 @@ func (r *ValkeyClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	if reloaded, after, err := r.reconcileTLSReload(ctx, &vc); err != nil {
 		return ctrl.Result{}, err
 	} else if reloaded {
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{RequeueAfter: time.Second}, nil
 	} else if after > 0 {
 		return ctrl.Result{RequeueAfter: after}, nil
 	}
