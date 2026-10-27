@@ -15,6 +15,16 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   unchanged. The valkey-cluster chart exposes it as
   `networkPolicy.metricsFrom`.
 
+### Fixed
+
+- In the Sentinel topology, data pods removed by a scale-down no longer stay
+  in every Sentinel as `s_down` replicas (#83). The operator counted only
+  entries recorded by IP as stale, and since 0.12.0 the data pods announce
+  their DNS name, so a removed pod was never cleaned up and `num-slaves`
+  stayed too high. An `s_down` entry under the name of a data pod with an
+  ordinal at or above `spec.replicas` now counts as stale, and the operator
+  resets the Sentinels one at a time as it does for the other dead entries.
+
 ## [0.12.2]
 
 ### Changed

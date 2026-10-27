@@ -8,6 +8,10 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	cachev1beta1 "github.com/melancholictheory/wellcake/api/v1beta1"
 )
 
 func TestPickSentinelToReset(t *testing.T) {
@@ -48,6 +52,8 @@ func TestSentinelViewCountsStaleReplicas(t *testing.T) {
 		{"name", "s-2.s-headless:6379", "ip", "s-2.s-headless", "flags", "s_down,slave"},
 		{"name", "10.0.0.7:6379", "ip", "10.0.0.7", "flags", "s_down,slave"},
 		{"name", "10.0.0.8:6379", "ip", "10.0.0.8", "flags", "slave"},
+		{"name", "s-4.s-headless:6379", "ip", "s-4.s-headless", "flags", "s_down,slave"},
+		{"name", "s-3.s-headless:6379", "ip", "s-3.s-headless", "flags", "slave"},
 	}
 	host, port := m.hostPort(t)
 	c := dialReplClient(context.Background(), host, port, "", false, nil, 2*time.Second)
@@ -55,11 +61,14 @@ func TestSentinelViewCountsStaleReplicas(t *testing.T) {
 		t.Fatal("dial mock")
 	}
 	defer c.close()
-	v, err := c.sentinelView(context.Background(), "mymaster")
+	// spec.replicas is 3: s-4 was scaled down, s-2 is restarting, and s-3 is
+	// not down (a scale-up the Sentinels already know about).
+	scaledDown := func(host string) bool { return host == "s-3.s-headless" || host == "s-4.s-headless" }
+	v, err := c.sentinelView(context.Background(), "mymaster", scaledDown)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v.master != "s-1.s-headless:6379" || v.flags != "master" || v.otherSentinels != 3 || v.staleReplicas != 1 {
+	if v.master != "s-1.s-headless:6379" || v.flags != "master" || v.otherSentinels != 3 || v.staleReplicas != 2 {
 		t.Errorf("sentinelView = %+v", v)
 	}
 }
@@ -95,5 +104,27 @@ func TestMisplacedDataPod(t *testing.T) {
 				t.Errorf("misplacedDataPod = %d, want %d", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestScaledDownDataPod(t *testing.T) {
+	vc := &cachev1beta1.ValkeyCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "s", Namespace: "ns"},
+		Spec:       cachev1beta1.ValkeyClusterSpec{Topology: cachev1beta1.TopologySentinel, Replicas: 3},
+	}
+	gone := scaledDownDataPod(vc)
+	for host, want := range map[string]bool{
+		"s-3.s-headless.ns.svc.cluster.local":          true, // scaled down
+		"s-12.s-headless.ns.svc.cluster.local":         true,
+		"s-2.s-headless.ns.svc.cluster.local":          false, // within spec.replicas: restarting
+		"s-0.s-headless.ns.svc.cluster.local":          false,
+		"s-3.s-headless.other.svc.cluster.local":       false, // another namespace
+		"x-3.x-headless.ns.svc.cluster.local":          false, // another cluster
+		"s-sentinel-3.s-sentinel.ns.svc.cluster.local": false,
+		"10.0.0.7": false, // by IP: handled separately
+	} {
+		if got := gone(host); got != want {
+			t.Errorf("scaledDownDataPod(%q) = %v, want %v", host, got, want)
+		}
 	}
 }

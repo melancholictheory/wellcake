@@ -797,6 +797,22 @@ func (r *ValkeyClusterReconciler) resetStaleSentinels(ctx context.Context, vc *c
 	return true
 }
 
+// scaledDownDataPod reports whether a host the Sentinels list is one of this
+// cluster's data pods removed by a scale-down: its DNS name, with an ordinal at
+// or above spec.replicas. Such a pod is not coming back, unlike a pod that is
+// restarting.
+func scaledDownDataPod(vc *cachev1beta1.ValkeyCluster) func(host string) bool {
+	sts := statefulSetName(vc)
+	suffix := "." + headlessServiceName(vc) + "." + vc.Namespace + ".svc.cluster.local"
+	return func(host string) bool {
+		if !strings.HasSuffix(host, suffix) {
+			return false
+		}
+		ord, ok := ordinalFromPodName(podNameFromFQDN(host), sts)
+		return ok && ord >= vc.Spec.Replicas
+	}
+}
+
 // collectSentinelViews reads every Ready Sentinel's view of the master. A
 // Sentinel that is down or does not answer is left out, which the callers
 // read as "not every Sentinel agrees" and then do nothing.
@@ -807,6 +823,7 @@ func (r *ValkeyClusterReconciler) collectSentinelViews(ctx context.Context, vc *
 	}
 	port := sentinelListenPort(vc)
 	cert := loadMTLSClientCert(ctx, r, vc)
+	scaledDown := scaledDownDataPod(vc)
 	var views []sentinelView
 	for _, p := range pods {
 		if !p.ready {
@@ -816,7 +833,7 @@ func (r *ValkeyClusterReconciler) collectSentinelViews(ctx context.Context, vc *
 		if c == nil {
 			continue
 		}
-		v, err := c.sentinelView(ctx, sentinelMasterName)
+		v, err := c.sentinelView(ctx, sentinelMasterName, scaledDown)
 		c.close()
 		if err != nil {
 			continue
@@ -935,7 +952,7 @@ func misplacedDataPod(survey []podRole, masterOrd int32, ordinalOf func(string) 
 }
 
 // sentinelView reads SENTINEL MASTER and SENTINEL REPLICAS for one master.
-func (c *replClient) sentinelView(ctx context.Context, name string) (sentinelView, error) {
+func (c *replClient) sentinelView(ctx context.Context, name string, scaledDown func(host string) bool) (sentinelView, error) {
 	m, err := c.sentinelMaster(ctx, name)
 	if err != nil {
 		return sentinelView{}, err
@@ -955,7 +972,10 @@ func (c *replClient) sentinelView(ctx context.Context, name string) (sentinelVie
 		if err != nil {
 			return sentinelView{}, err
 		}
-		if strings.Contains(rep["flags"], "s_down") && net.ParseIP(rep["ip"]) != nil {
+		// An entry recorded by IP predates the pods announcing their name, and an
+		// entry for a scaled-down pod will never come back. A pod that is down
+		// under a name within spec.replicas is restarting, and it stays.
+		if strings.Contains(rep["flags"], "s_down") && (net.ParseIP(rep["ip"]) != nil || scaledDown(rep["ip"])) {
 			v.staleReplicas++
 		}
 	}
