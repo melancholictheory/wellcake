@@ -49,7 +49,7 @@ ROADMAP T7.
 - `TestRenderInitScriptSeedsSentinelACLUser` — the Sentinel topology seeds a `sentinel-user` with no key access (S1); other topologies do not.
 - `TestBuildBootstrapJob` — the bootstrap job: node list, `--cluster-replicas`, preflight, auth/TLS.
 - `TestACLTargets` — ACL fan-out targets (the primary for Replication, all nodes for Cluster).
-- `TestBuildNetworkPolicy` — ports (valkey/exporter/TLS) and peers.
+- `TestBuildNetworkPolicy` — ports (valkey/exporter/TLS), peers and the separate `metricsFrom` rule.
 - `TestBuildRestoreInitContainerPerShard` — restore-init: Cluster → per-shard (`{shard}` substituted by ordinal, masters only); single-shard → key verbatim.
 
 ### `rollout_test.go` / `rollout_sentinel_test.go` — proactive rolling restart (ADR 0004)

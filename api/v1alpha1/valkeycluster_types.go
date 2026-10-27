@@ -423,6 +423,13 @@ type NetworkPolicySpec struct {
 	// If empty, only pods in the same namespace are allowed.
 	// +optional
 	AllowFrom []networkingv1.NetworkPolicyPeer `json:"allowFrom,omitempty"`
+
+	// MetricsFrom is a list of pod/namespace selectors allowed to reach the
+	// exporter port. When set, the exporter port gets its own rule open to these
+	// peers only, and is no longer open to AllowFrom. If empty, the exporter port
+	// stays open to AllowFrom.
+	// +optional
+	MetricsFrom []networkingv1.NetworkPolicyPeer `json:"metricsFrom,omitempty"`
 }
 
 // StorageSpec configures PVC-backed persistence.

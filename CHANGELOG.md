@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims to
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `spec.networkPolicy.metricsFrom` on `ValkeyCluster` (v1beta1 and v1alpha1)
+  lists the peers allowed to reach the metrics exporter port (#74). When set,
+  that port gets its own ingress rule open to these peers only, and the
+  `allowFrom` peers (the clients) no longer reach it. Left empty, the policy is
+  unchanged. The valkey-cluster chart exposes it as
+  `networkPolicy.metricsFrom`.
+
 ## [0.12.2]
 
 ### Changed

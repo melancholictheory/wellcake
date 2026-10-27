@@ -128,6 +128,18 @@ podDisruptionBudget:
 networkPolicy:
   enabled: false
   allowFrom: []
+  # Peers allowed to reach the metrics exporter port. When set, the clients in
+  # allowFrom no longer reach it. Empty: the exporter port is open to allowFrom.
+  metricsFrom: []
+  # Example:
+  # allowFrom:
+  #   - podSelector:
+  #       matchLabels:
+  #         app.kubernetes.io/name: my-consumer
+  # metricsFrom:
+  #   - namespaceSelector:
+  #       matchLabels:
+  #         kubernetes.io/metadata.name: monitoring
 
 backup:
   enabled: false
@@ -143,8 +155,3 @@ backup:
     credentialsSecret: ""
     encryption: ""        # "" (off) | AES256 | KMS
     kmsKeyId: ""          # optional, with encryption=KMS; empty uses the S3 default KMS key
-  # Example:
-  # allowFrom:
-  #   - podSelector:
-  #       matchLabels:
-  #         app.kubernetes.io/name: my-consumer

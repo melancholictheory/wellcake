@@ -12,8 +12,10 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -360,6 +362,38 @@ func TestBuildNetworkPolicy(t *testing.T) {
 	m.Spec.Metrics = &cachev1beta1.MetricsSpec{Enabled: true}
 	if ports := buildNetworkPolicy(m).Spec.Ingress[0].Ports; len(ports) != 2 {
 		t.Errorf("metrics NP should expose 2 ports (valkey + exporter), got %d", len(ports))
+	}
+
+	// metricsFrom → the exporter port moves to its own rule, open to those peers only.
+	monitoring := networkingv1.NetworkPolicyPeer{NamespaceSelector: &metav1.LabelSelector{
+		MatchLabels: map[string]string{"kubernetes.io/metadata.name": "monitoring"},
+	}}
+	mf := minimalCR()
+	mf.Spec.Metrics = &cachev1beta1.MetricsSpec{Enabled: true}
+	mf.Spec.NetworkPolicy = &cachev1beta1.NetworkPolicySpec{
+		Enabled:     true,
+		MetricsFrom: []networkingv1.NetworkPolicyPeer{monitoring},
+	}
+	ing := buildNetworkPolicy(mf).Spec.Ingress
+	if len(ing) != 2 {
+		t.Fatalf("metricsFrom NP should have 2 ingress rules, got %d", len(ing))
+	}
+	for _, p := range ing[0].Ports {
+		if p.Port.IntValue() == int(exporterPort) {
+			t.Errorf("metricsFrom NP: exporter port must not be in the allowFrom rule: %+v", ing[0].Ports)
+		}
+	}
+	if len(ing[1].Ports) != 1 || ing[1].Ports[0].Port.IntValue() != int(exporterPort) {
+		t.Errorf("metricsFrom NP: second rule should only open the exporter port, got %+v", ing[1].Ports)
+	}
+	if !equality.Semantic.DeepEqual(ing[1].From, []networkingv1.NetworkPolicyPeer{monitoring}) {
+		t.Errorf("metricsFrom NP: second rule peers = %+v, want only metricsFrom", ing[1].From)
+	}
+
+	// metricsFrom without metrics → no exporter rule at all.
+	mf.Spec.Metrics = nil
+	if ing := buildNetworkPolicy(mf).Spec.Ingress; len(ing) != 1 || len(ing[0].Ports) != 1 {
+		t.Errorf("metricsFrom without metrics should keep one rule with the Valkey port only, got %+v", ing)
 	}
 
 	// TLS → ingress on the TLS port.

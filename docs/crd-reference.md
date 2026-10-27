@@ -62,6 +62,7 @@ Short names: `vk`, `vkc`. Printer columns: `Topology`, `Replicas`,
 | `networkPolicy`               | `NetworkPolicySpec`        | disabled       | Opens the data port, the exporter port when metrics are on, and the Sentinel port in the Sentinel topology. |
 | `networkPolicy.enabled`       | bool                       | `false`        | |
 | `networkPolicy.allowFrom`     | []NetworkPolicyPeer        | same-namespace | Always plus Valkey-to-Valkey. |
+| `networkPolicy.metricsFrom`   | []NetworkPolicyPeer        | empty          | When set (and metrics are on), the exporter port gets its own rule open to these peers only, and is removed from the `allowFrom` rule. Empty: the exporter port is open to `allowFrom`. |
 | `backup`                      | `BackupSpec`               | disabled       | |
 | `backup.enabled`              | bool                       | `false`        | Creates a CronJob that takes an RDB dump and uploads it to S3. |
 | `backup.schedule`             | string (cron)              | `0 3 * * *`    | |
@@ -236,6 +237,10 @@ spec:
       - podSelector:
           matchLabels:
             app.kubernetes.io/name: api
+    metricsFrom:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: monitoring
   config:
     timeout: "0"
     tcp-keepalive: "60"

@@ -1417,9 +1417,16 @@ func buildNetworkPolicy(vc *cachev1beta1.ValkeyCluster) *networkingv1.NetworkPol
 		port = intstr.FromInt32(valkeyTLSPort)
 	}
 	ports = append(ports, networkingv1.NetworkPolicyPort{Protocol: &proto, Port: &port})
-	if metricsEnabled(vc) {
-		mp := intstr.FromInt32(exporterPort)
-		ports = append(ports, networkingv1.NetworkPolicyPort{Protocol: &proto, Port: &mp})
+	// With metricsFrom set, the exporter port gets its own rule below, so the
+	// allowFrom peers (clients) no longer reach it.
+	var metricsFrom []networkingv1.NetworkPolicyPeer
+	if vc.Spec.NetworkPolicy != nil {
+		metricsFrom = vc.Spec.NetworkPolicy.MetricsFrom
+	}
+	mp := intstr.FromInt32(exporterPort)
+	metricsPorts := []networkingv1.NetworkPolicyPort{{Protocol: &proto, Port: &mp}}
+	if metricsEnabled(vc) && len(metricsFrom) == 0 {
+		ports = append(ports, metricsPorts...)
 	}
 	if vc.Spec.Topology == cachev1beta1.TopologySentinel {
 		// The Sentinel pods share the data pods' labels, so this policy isolates
@@ -1443,6 +1450,11 @@ func buildNetworkPolicy(vc *cachev1beta1.ValkeyCluster) *networkingv1.NetworkPol
 		PodSelector: &metav1.LabelSelector{MatchLabels: labelsFor(vc)},
 	})
 
+	ingress := []networkingv1.NetworkPolicyIngressRule{{From: peers, Ports: ports}}
+	if metricsEnabled(vc) && len(metricsFrom) > 0 {
+		ingress = append(ingress, networkingv1.NetworkPolicyIngressRule{From: metricsFrom, Ports: metricsPorts})
+	}
+
 	return &networkingv1.NetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      vc.Name + "-allow",
@@ -1452,10 +1464,7 @@ func buildNetworkPolicy(vc *cachev1beta1.ValkeyCluster) *networkingv1.NetworkPol
 		Spec: networkingv1.NetworkPolicySpec{
 			PodSelector: metav1.LabelSelector{MatchLabels: labelsFor(vc)},
 			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
-			Ingress: []networkingv1.NetworkPolicyIngressRule{{
-				From:  peers,
-				Ports: ports,
-			}},
+			Ingress:     ingress,
 		},
 	}
 }

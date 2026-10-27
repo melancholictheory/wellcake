@@ -130,6 +130,10 @@ spec:
     allowFrom:
       {{- toYaml . | nindent 6 }}
     {{- end }}
+    {{- with .Values.networkPolicy.metricsFrom }}
+    metricsFrom:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
   {{- end }}
   {{- if .Values.backup.enabled }}
   backup:
