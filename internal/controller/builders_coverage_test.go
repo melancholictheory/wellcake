@@ -396,6 +396,26 @@ func TestBuildNetworkPolicy(t *testing.T) {
 		t.Errorf("metricsFrom without metrics should keep one rule with the Valkey port only, got %+v", ing)
 	}
 
+	// Cluster → a second rule opens the bus port to the cluster's own pods
+	// only. Without it, CLUSTER MEET and gossip are refused and the cluster
+	// never forms.
+	cb := minimalCR()
+	cb.Spec.Topology = cachev1beta1.TopologyCluster
+	cb.Spec.NetworkPolicy = &cachev1beta1.NetworkPolicySpec{Enabled: true}
+	ing = buildNetworkPolicy(cb).Spec.Ingress
+	if len(ing) != 2 {
+		t.Fatalf("Cluster NP should have 2 ingress rules, got %d", len(ing))
+	}
+	for _, p := range ing[0].Ports {
+		if p.Port.IntValue() == int(clusterBusPort) {
+			t.Errorf("Cluster NP: bus port must not be open to the client peers: %+v", ing[0].Ports)
+		}
+	}
+	self := []networkingv1.NetworkPolicyPeer{{PodSelector: &metav1.LabelSelector{MatchLabels: labelsFor(cb)}}}
+	if len(ing[1].Ports) != 1 || ing[1].Ports[0].Port.IntValue() != int(clusterBusPort) || !equality.Semantic.DeepEqual(ing[1].From, self) {
+		t.Errorf("Cluster NP: second rule should open only %d to the cluster's pods, got %+v", clusterBusPort, ing[1])
+	}
+
 	// TLS → ingress on the TLS port.
 	t9 := minimalCR()
 	t9.Spec.TLS = &cachev1beta1.TLSSpec{Enabled: true}

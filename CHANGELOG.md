@@ -15,6 +15,17 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   unchanged. The valkey-cluster chart exposes it as
   `networkPolicy.metricsFrom`.
 
+### Fixed
+
+- With `spec.networkPolicy.enabled` in the Cluster topology, the generated
+  NetworkPolicy now opens the cluster bus port (16379) between the cluster's
+  own pods. It only opened the client port, so `CLUSTER MEET` and gossip were
+  refused: a new cluster never formed (the bootstrap Job waited forever), and
+  turning the policy on for a running cluster cut gossip and failover
+  detection between the nodes. The bus port gets its own rule, open to the
+  cluster's pods only, not to the `allowFrom` peers. A cluster whose bootstrap
+  got stuck needs to be recreated.
+
 ## [0.12.2]
 
 ### Changed
