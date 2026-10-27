@@ -447,6 +447,33 @@ type NetworkPolicySpec struct {
 	// stays open to AllowFrom.
 	// +optional
 	MetricsFrom []networkingv1.NetworkPolicyPeer `json:"metricsFrom,omitempty"`
+
+	// Egress adds Egress to the policy types, with rules for DNS and for
+	// Valkey-to-Valkey traffic. Unset or disabled, the policy only covers
+	// ingress.
+	// +optional
+	Egress *NetworkPolicyEgressSpec `json:"egress,omitempty"`
+}
+
+// NetworkPolicyEgressSpec configures the egress side of the generated
+// NetworkPolicy. It applies to every pod with the cluster's labels: the data
+// pods, the Sentinels, the Cluster Jobs and the backup CronJob.
+type NetworkPolicyEgressSpec struct {
+	// Enabled adds Egress to the policy types: DNS and Valkey-to-Valkey traffic
+	// are allowed, everything else is denied unless listed in Extra.
+	Enabled bool `json:"enabled,omitempty"`
+
+	// DNS lists the DNS servers the pods may reach on UDP and TCP 53. If empty,
+	// the kube-dns pods (k8s-app: kube-dns) in kube-system. Set it for
+	// NodeLocal DNSCache or a DNS service with other labels.
+	// +optional
+	DNS []networkingv1.NetworkPolicyPeer `json:"dns,omitempty"`
+
+	// Extra egress rules appended as they are, for traffic that leaves the
+	// cluster: the S3 endpoint of backup and restoreFrom, or a replicateFrom
+	// source.
+	// +optional
+	Extra []networkingv1.NetworkPolicyEgressRule `json:"extra,omitempty"`
 }
 
 // StorageSpec configures PVC-backed persistence.

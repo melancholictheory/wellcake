@@ -63,6 +63,9 @@ Short names: `vk`, `vkc`. Printer columns: `Topology`, `Replicas`,
 | `networkPolicy.enabled`       | bool                       | `false`        | |
 | `networkPolicy.allowFrom`     | []NetworkPolicyPeer        | same-namespace | Always plus Valkey-to-Valkey. |
 | `networkPolicy.metricsFrom`   | []NetworkPolicyPeer        | empty          | When set (and metrics are on), the exporter port gets its own rule open to these peers only, and is removed from the `allowFrom` rule. Empty: the exporter port is open to `allowFrom`. |
+| `networkPolicy.egress.enabled` | bool                      | `false`        | Adds `Egress` to the policy types: DNS and Valkey-to-Valkey traffic (data or TLS port, cluster bus, Sentinel port) are allowed, everything else is denied unless listed in `extra`. Applies to every pod with the cluster's labels, Jobs and backup CronJob included. |
+| `networkPolicy.egress.dns`    | []NetworkPolicyPeer        | kube-dns       | DNS servers reachable on UDP and TCP 53. Empty: the `k8s-app: kube-dns` pods in `kube-system`. Set it for NodeLocal DNSCache. |
+| `networkPolicy.egress.extra`  | []NetworkPolicyEgressRule  | empty          | Appended as is. Needed for the S3 endpoint of `backup` and `restoreFrom`, and for a `replicateFrom` source. A port without a protocol is TCP. |
 | `backup`                      | `BackupSpec`               | disabled       | |
 | `backup.enabled`              | bool                       | `false`        | Creates a CronJob that takes an RDB dump and uploads it to S3. |
 | `backup.schedule`             | string (cron)              | `0 3 * * *`    | |

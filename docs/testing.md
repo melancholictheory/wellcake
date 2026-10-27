@@ -50,6 +50,9 @@ ROADMAP T7.
 - `TestBuildBootstrapJob` — the bootstrap job: node list, `--cluster-replicas`, preflight, auth/TLS.
 - `TestACLTargets` — ACL fan-out targets (the primary for Replication, all nodes for Cluster).
 - `TestBuildNetworkPolicy` — ports (valkey/exporter/TLS), peers and the separate `metricsFrom` rule.
+- `TestNetworkPolicyEgress` — egress rules: default and custom DNS, the peer rule, `extra` appended with TCP as the default protocol.
+- `TestNetworkPolicyPeerPortsBothWays` — with egress on, the Valkey-to-Valkey ports (`peerPorts`) are open both ways between the cluster's pods, for each topology with and without TLS.
+- `TestNetworkPolicyClusterJobs` — a Cluster Job reaches the data pods on 6379 and 16379, in and out, with egress on.
 - `TestBuildRestoreInitContainerPerShard` — restore-init: Cluster → per-shard (`{shard}` substituted by ordinal, masters only); single-shard → key verbatim.
 
 ### `rollout_test.go` / `rollout_sentinel_test.go` — proactive rolling restart (ADR 0004)

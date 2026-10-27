@@ -16,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -421,6 +422,180 @@ func TestBuildNetworkPolicy(t *testing.T) {
 	t9.Spec.TLS = &cachev1beta1.TLSSpec{Enabled: true}
 	if p := buildNetworkPolicy(t9).Spec.Ingress[0].Ports[0].Port.IntValue(); p != int(valkeyTLSPort) {
 		t.Errorf("TLS NP port = %d, want %d", p, valkeyTLSPort)
+	}
+}
+
+// npRule is an ingress or egress rule: its peers and its ports.
+type npRule struct {
+	peers []networkingv1.NetworkPolicyPeer
+	ports []networkingv1.NetworkPolicyPort
+}
+
+func ingressRules(np *networkingv1.NetworkPolicy) []npRule {
+	out := make([]npRule, 0, len(np.Spec.Ingress))
+	for _, r := range np.Spec.Ingress {
+		out = append(out, npRule{r.From, r.Ports})
+	}
+	return out
+}
+
+func egressRules(np *networkingv1.NetworkPolicy) []npRule {
+	out := make([]npRule, 0, len(np.Spec.Egress))
+	for _, r := range np.Spec.Egress {
+		out = append(out, npRule{r.To, r.Ports})
+	}
+	return out
+}
+
+func selectorMatches(sel *metav1.LabelSelector, set labels.Set) bool {
+	s, err := metav1.LabelSelectorAsSelector(sel)
+	return err == nil && s.Matches(set)
+}
+
+// npAllows reports whether one of the rules lets a same-namespace pod with
+// these labels through on that port.
+func npAllows(rules []npRule, set labels.Set, port int32) bool {
+	for _, r := range rules {
+		peerOK := false
+		for _, peer := range r.peers {
+			if peer.NamespaceSelector == nil && peer.IPBlock == nil && peer.PodSelector != nil && selectorMatches(peer.PodSelector, set) {
+				peerOK = true
+			}
+		}
+		if !peerOK {
+			continue
+		}
+		for _, p := range r.ports {
+			if p.Port.IntValue() == int(port) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func TestNetworkPolicyEgress(t *testing.T) {
+	// Egress unset → ingress only.
+	if np := buildNetworkPolicy(minimalCR()); !equality.Semantic.DeepEqual(np.Spec.PolicyTypes, []networkingv1.PolicyType{networkingv1.PolicyTypeIngress}) || np.Spec.Egress != nil {
+		t.Errorf("default NP must be ingress only, got %v / %+v", np.Spec.PolicyTypes, np.Spec.Egress)
+	}
+
+	vc := sentinelCR()
+	vc.Spec.NetworkPolicy = &cachev1beta1.NetworkPolicySpec{
+		Enabled: true,
+		Egress:  &cachev1beta1.NetworkPolicyEgressSpec{Enabled: true},
+	}
+	np := buildNetworkPolicy(vc)
+	if !equality.Semantic.DeepEqual(np.Spec.PolicyTypes, []networkingv1.PolicyType{networkingv1.PolicyTypeIngress, networkingv1.PolicyTypeEgress}) {
+		t.Fatalf("egress NP policy types = %v", np.Spec.PolicyTypes)
+	}
+	if len(np.Spec.Egress) != 2 {
+		t.Fatalf("egress NP should have a DNS and a peer rule, got %+v", np.Spec.Egress)
+	}
+
+	// Default DNS: kube-dns in kube-system, UDP and TCP 53.
+	dns := np.Spec.Egress[0]
+	if len(dns.To) != 1 || dns.To[0].NamespaceSelector == nil || dns.To[0].PodSelector == nil ||
+		dns.To[0].NamespaceSelector.MatchLabels[corev1.LabelMetadataName] != "kube-system" ||
+		dns.To[0].PodSelector.MatchLabels["k8s-app"] != "kube-dns" {
+		t.Errorf("default DNS peer should be kube-system/kube-dns, got %+v", dns.To)
+	}
+	if len(dns.Ports) != 2 || *dns.Ports[0].Protocol != corev1.ProtocolUDP || *dns.Ports[1].Protocol != corev1.ProtocolTCP ||
+		dns.Ports[0].Port.IntValue() != 53 || dns.Ports[1].Port.IntValue() != 53 {
+		t.Errorf("DNS rule should open UDP and TCP 53, got %+v", dns.Ports)
+	}
+
+	// Peer rule: the cluster's pods on peerPorts.
+	self := []networkingv1.NetworkPolicyPeer{{PodSelector: &metav1.LabelSelector{MatchLabels: labelsFor(vc)}}}
+	if !equality.Semantic.DeepEqual(np.Spec.Egress[1].To, self) || !equality.Semantic.DeepEqual(np.Spec.Egress[1].Ports, peerPorts(vc)) {
+		t.Errorf("egress peer rule = %+v, want the cluster's pods on %+v", np.Spec.Egress[1], peerPorts(vc))
+	}
+
+	// Custom DNS and extra rules, appended as they are; a port without a
+	// protocol gets TCP, as the API server would default it.
+	nodeLocal := networkingv1.NetworkPolicyPeer{IPBlock: &networkingv1.IPBlock{CIDR: "169.254.20.10/32"}}
+	https := intstr.FromInt32(443)
+	s3 := networkingv1.NetworkPolicyEgressRule{
+		To:    []networkingv1.NetworkPolicyPeer{{IPBlock: &networkingv1.IPBlock{CIDR: "10.0.0.0/8"}}},
+		Ports: []networkingv1.NetworkPolicyPort{{Port: &https}},
+	}
+	vc.Spec.NetworkPolicy.Egress.DNS = []networkingv1.NetworkPolicyPeer{nodeLocal}
+	vc.Spec.NetworkPolicy.Egress.Extra = []networkingv1.NetworkPolicyEgressRule{s3}
+	np = buildNetworkPolicy(vc)
+	if len(np.Spec.Egress) != 3 {
+		t.Fatalf("egress NP with extra should have 3 rules, got %+v", np.Spec.Egress)
+	}
+	if !equality.Semantic.DeepEqual(np.Spec.Egress[0].To, []networkingv1.NetworkPolicyPeer{nodeLocal}) {
+		t.Errorf("custom DNS peers = %+v, want %+v", np.Spec.Egress[0].To, nodeLocal)
+	}
+	extra := np.Spec.Egress[2]
+	if !equality.Semantic.DeepEqual(extra.To, s3.To) || extra.Ports[0].Port.IntValue() != 443 ||
+		extra.Ports[0].Protocol == nil || *extra.Ports[0].Protocol != corev1.ProtocolTCP {
+		t.Errorf("extra rule = %+v, want %+v with TCP", extra, s3)
+	}
+	if s3.Ports[0].Protocol != nil {
+		t.Errorf("building the policy must not modify the spec's extra rules")
+	}
+
+	// Disabled egress → ingress only, whatever dns and extra hold.
+	vc.Spec.NetworkPolicy.Egress.Enabled = false
+	if np := buildNetworkPolicy(vc); len(np.Spec.PolicyTypes) != 1 || np.Spec.Egress != nil {
+		t.Errorf("disabled egress must leave an ingress-only policy, got %v / %+v", np.Spec.PolicyTypes, np.Spec.Egress)
+	}
+}
+
+// With egress on, both directions open the same Valkey-to-Valkey ports,
+// whatever the topology and TLS: what a pod may send, its peers accept.
+func TestNetworkPolicyPeerPortsBothWays(t *testing.T) {
+	for _, topo := range []cachev1beta1.Topology{cachev1beta1.TopologyReplication, cachev1beta1.TopologySentinel, cachev1beta1.TopologyCluster} {
+		for _, tlsOn := range []bool{false, true} {
+			c := minimalCR()
+			c.Spec.Topology = topo
+			if tlsOn {
+				c.Spec.TLS = &cachev1beta1.TLSSpec{Enabled: true}
+			}
+			c.Spec.NetworkPolicy = &cachev1beta1.NetworkPolicySpec{
+				Enabled: true,
+				Egress:  &cachev1beta1.NetworkPolicyEgressSpec{Enabled: true},
+			}
+			cnp := buildNetworkPolicy(c)
+			set := labels.Set(labelsFor(c))
+			for _, p := range peerPorts(c) {
+				port := int32(p.Port.IntValue())
+				if !npAllows(ingressRules(cnp), set, port) || !npAllows(egressRules(cnp), set, port) {
+					t.Errorf("%s tls=%v: port %d must be open between the cluster's pods both ways: %+v", topo, tlsOn, port, cnp.Spec)
+				}
+			}
+		}
+	}
+}
+
+// The Cluster Jobs carry the cluster's labels, so the policy selects them:
+// with egress on, a Job must still reach the nodes on the data port and the
+// cluster bus, out of the Job and into the data pods.
+func TestNetworkPolicyClusterJobs(t *testing.T) {
+	vc := minimalCR()
+	vc.Spec.Topology = cachev1beta1.TopologyCluster
+	vc.Spec.Shards = ptr.To[int32](3)
+	vc.Spec.ReplicasPerShard = ptr.To[int32](1)
+	vc.Spec.NetworkPolicy = &cachev1beta1.NetworkPolicySpec{
+		Enabled: true,
+		Egress:  &cachev1beta1.NetworkPolicyEgressSpec{Enabled: true},
+	}
+	np := buildNetworkPolicy(vc)
+	jobLabels := labels.Set(buildBootstrapJob(vc, "", "c-bootstrap").Spec.Template.Labels)
+	dataLabels := labels.Set(buildStatefulSet(vc, "", false).Spec.Template.Labels)
+
+	if !selectorMatches(&np.Spec.PodSelector, jobLabels) || !selectorMatches(&np.Spec.PodSelector, dataLabels) {
+		t.Fatalf("the policy must select the bootstrap Job and the data pods")
+	}
+	for _, port := range []int32{valkeyPort, clusterBusPort} {
+		if !npAllows(ingressRules(np), jobLabels, port) {
+			t.Errorf("ingress must accept the bootstrap Job on %d: %+v", port, np.Spec.Ingress)
+		}
+		if !npAllows(egressRules(np), dataLabels, port) {
+			t.Errorf("egress must let the bootstrap Job reach the data pods on %d: %+v", port, np.Spec.Egress)
+		}
 	}
 }
 

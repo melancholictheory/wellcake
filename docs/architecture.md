@@ -228,7 +228,8 @@ policies.
 - **TLS opt-in** with cert-manager integration (a reference to an Issuer) or a
   reference to a preallocated Secret.
 - **NetworkPolicy opt-in** — default-deny + same-namespace allow +
-  Valkey-to-Valkey for replication and gossip.
+  Valkey-to-Valkey for replication and gossip; opt-in egress (DNS,
+  Valkey-to-Valkey, extra rules).
 - **CEL XValidation** on immutable fields: `topology`, `profile`,
   `storage.storageClassName`, `storage.mode`, `storage.medium`,
   `perShardWorkload`. Expand-only on `storage.size` via

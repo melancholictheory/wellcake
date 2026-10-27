@@ -1409,6 +1409,29 @@ func pdbEnabled(vc *cachev1beta1.ValkeyCluster) bool {
 	return ptr.Deref(vc.Spec.PodDisruptionBudget.Enabled, true)
 }
 
+// peerPorts are the ports Valkey pods use to reach each other: the data port
+// (or the TLS port), the cluster bus in the Cluster topology, and the Sentinel
+// port in the Sentinel topology. The egress peer rule opens them; on the
+// ingress side the cluster's pods get the same ports from the allowFrom rule
+// and the cluster bus rule.
+func peerPorts(vc *cachev1beta1.ValkeyCluster) []networkingv1.NetworkPolicyPort {
+	proto := corev1.ProtocolTCP
+	port := intstr.FromInt32(valkeyPort)
+	if tlsEnabled(vc) {
+		port = intstr.FromInt32(valkeyTLSPort)
+	}
+	ports := []networkingv1.NetworkPolicyPort{{Protocol: &proto, Port: &port}}
+	if vc.Spec.Topology == cachev1beta1.TopologyCluster {
+		bp := intstr.FromInt32(clusterBusPort)
+		ports = append(ports, networkingv1.NetworkPolicyPort{Protocol: &proto, Port: &bp})
+	}
+	if vc.Spec.Topology == cachev1beta1.TopologySentinel {
+		sp := intstr.FromInt32(sentinelListenPort(vc))
+		ports = append(ports, networkingv1.NetworkPolicyPort{Protocol: &proto, Port: &sp})
+	}
+	return ports
+}
+
 func buildNetworkPolicy(vc *cachev1beta1.ValkeyCluster) *networkingv1.NetworkPolicy {
 	ports := []networkingv1.NetworkPolicyPort{}
 	proto := corev1.ProtocolTCP
@@ -1465,6 +1488,12 @@ func buildNetworkPolicy(vc *cachev1beta1.ValkeyCluster) *networkingv1.NetworkPol
 		ingress = append(ingress, networkingv1.NetworkPolicyIngressRule{From: metricsFrom, Ports: metricsPorts})
 	}
 
+	policyTypes := []networkingv1.PolicyType{networkingv1.PolicyTypeIngress}
+	egress := buildNetworkPolicyEgress(vc, self)
+	if egress != nil {
+		policyTypes = append(policyTypes, networkingv1.PolicyTypeEgress)
+	}
+
 	return &networkingv1.NetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      vc.Name + "-allow",
@@ -1473,10 +1502,58 @@ func buildNetworkPolicy(vc *cachev1beta1.ValkeyCluster) *networkingv1.NetworkPol
 		},
 		Spec: networkingv1.NetworkPolicySpec{
 			PodSelector: metav1.LabelSelector{MatchLabels: labelsFor(vc)},
-			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
+			PolicyTypes: policyTypes,
 			Ingress:     ingress,
+			Egress:      egress,
 		},
 	}
+}
+
+// buildNetworkPolicyEgress returns the egress rules, or nil when egress is
+// off: DNS, the cluster's own pods on peerPorts, then egress.extra.
+func buildNetworkPolicyEgress(vc *cachev1beta1.ValkeyCluster, self networkingv1.NetworkPolicyPeer) []networkingv1.NetworkPolicyEgressRule {
+	if vc.Spec.NetworkPolicy == nil || vc.Spec.NetworkPolicy.Egress == nil || !vc.Spec.NetworkPolicy.Egress.Enabled {
+		return nil
+	}
+	e := vc.Spec.NetworkPolicy.Egress
+	dns := e.DNS
+	if len(dns) == 0 {
+		dns = []networkingv1.NetworkPolicyPeer{{
+			NamespaceSelector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{corev1.LabelMetadataName: metav1.NamespaceSystem},
+			},
+			PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"k8s-app": "kube-dns"}},
+		}}
+	}
+	tcp, udp := corev1.ProtocolTCP, corev1.ProtocolUDP
+	dnsPort := intstr.FromInt32(53)
+	egress := make([]networkingv1.NetworkPolicyEgressRule, 0, 2+len(e.Extra))
+	egress = append(egress,
+		networkingv1.NetworkPolicyEgressRule{To: dns, Ports: []networkingv1.NetworkPolicyPort{
+			{Protocol: &udp, Port: &dnsPort},
+			{Protocol: &tcp, Port: &dnsPort},
+		}},
+		networkingv1.NetworkPolicyEgressRule{To: []networkingv1.NetworkPolicyPeer{self}, Ports: peerPorts(vc)},
+	)
+	for _, r := range e.Extra {
+		egress = append(egress, withDefaultProtocol(r))
+	}
+	return egress
+}
+
+// withDefaultProtocol copies an egress.extra rule with TCP on the ports that
+// leave the protocol out. The API server defaults it to TCP, and
+// ensureNetworkPolicy compares the spec exactly, so a rule left as written
+// would be rewritten on every reconcile.
+func withDefaultProtocol(r networkingv1.NetworkPolicyEgressRule) networkingv1.NetworkPolicyEgressRule {
+	out := *r.DeepCopy()
+	for i := range out.Ports {
+		if out.Ports[i].Protocol == nil {
+			tcp := corev1.ProtocolTCP
+			out.Ports[i].Protocol = &tcp
+		}
+	}
+	return out
 }
 
 func networkPolicyEnabled(vc *cachev1beta1.ValkeyCluster) bool {

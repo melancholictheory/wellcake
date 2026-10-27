@@ -131,6 +131,12 @@ networkPolicy:
   # Peers allowed to reach the metrics exporter port. When set, the clients in
   # allowFrom no longer reach it. Empty: the exporter port is open to allowFrom.
   metricsFrom: []
+  # Egress rules (opt-in): DNS and Valkey-to-Valkey traffic, plus extra rules.
+  # Without extra rules, the backup upload, restoreFrom and replicateFrom are cut.
+  egress:
+    enabled: false
+    dns: []      # empty: kube-dns pods in kube-system, UDP and TCP 53
+    extra: []    # NetworkPolicyEgressRule list, appended as is
   # Example:
   # allowFrom:
   #   - podSelector:
@@ -140,6 +146,14 @@ networkPolicy:
   #   - namespaceSelector:
   #       matchLabels:
   #         kubernetes.io/metadata.name: monitoring
+  # egress:
+  #   enabled: true
+  #   extra:
+  #     - to:
+  #         - ipBlock:
+  #             cidr: 203.0.113.10/32   # S3 endpoint
+  #       ports:
+  #         - port: 443
 
 backup:
   enabled: false
