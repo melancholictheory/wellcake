@@ -1446,11 +1446,21 @@ func buildNetworkPolicy(vc *cachev1beta1.ValkeyCluster) *networkingv1.NetworkPol
 		})
 	}
 	// Always allow Valkey-to-Valkey for replication and gossip.
-	peers = append(peers, networkingv1.NetworkPolicyPeer{
+	self := networkingv1.NetworkPolicyPeer{
 		PodSelector: &metav1.LabelSelector{MatchLabels: labelsFor(vc)},
-	})
+	}
+	peers = append(peers, self)
 
 	ingress := []networkingv1.NetworkPolicyIngressRule{{From: peers, Ports: ports}}
+	if vc.Spec.Topology == cachev1beta1.TopologyCluster {
+		// The cluster bus (gossip, failover votes, CLUSTER MEET) runs between the
+		// nodes only, so it gets its own rule open to this cluster's pods.
+		bp := intstr.FromInt32(clusterBusPort)
+		ingress = append(ingress, networkingv1.NetworkPolicyIngressRule{
+			From:  []networkingv1.NetworkPolicyPeer{self},
+			Ports: []networkingv1.NetworkPolicyPort{{Protocol: &proto, Port: &bp}},
+		})
+	}
 	if metricsEnabled(vc) && len(metricsFrom) > 0 {
 		ingress = append(ingress, networkingv1.NetworkPolicyIngressRule{From: metricsFrom, Ports: metricsPorts})
 	}
