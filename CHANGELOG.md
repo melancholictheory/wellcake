@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims to
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- The valkey-cluster chart sets annotations on the `ValkeyCluster` resource
+  (`annotations`), so the operator's annotations can come from the chart
+  values: `valkey.wellcake.io/proactive-rollout`, the request annotations
+  (`restart`, `rotate-password`, `failover`, `reshard`), each acted on once per
+  new value, and `valkey.wellcake.io/accept-replication-durability-risk`,
+  without which the webhook rejects a new cluster with `profile: Durable` on
+  the Replication topology.
+
 ## [0.12.3]
 
 ### Added

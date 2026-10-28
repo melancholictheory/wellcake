@@ -497,6 +497,9 @@ window ~0. Works for Replication/Cluster/Sentinel, default OFF. Enable it:
 kubectl -n <ns> annotate valkeycluster <cluster> valkey.wellcake.io/proactive-rollout=true
 ```
 
+With the valkey-cluster chart, it can be set in the `annotations` value
+instead, next to the rest of the cluster's configuration.
+
 The password is excluded from the hash — password rotation does NOT roll
 the pods and **requires no manual restart**: the operator rotates the
 password in place via the annotation (see "Password rotation without a

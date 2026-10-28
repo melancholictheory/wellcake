@@ -5,6 +5,16 @@
 nameOverride: ""
 fullnameOverride: ""
 
+# Annotations on the ValkeyCluster resource (not on its pods), for the
+# operator's opt-in and request annotations. A request annotation (restart,
+# rotate-password, failover, reshard) acts once per new value, so set a new
+# value to run it again. Quote the values: Helm reads an unquoted number as a
+# float. Example:
+# annotations:
+#   valkey.wellcake.io/proactive-rollout: "true"
+#   valkey.wellcake.io/restart: "2026-10-28"
+annotations: {}
+
 # Optionally have this chart create the release Namespace and label it with the
 # Pod Security Standards, so the restricted-PSA-compatible Valkey pods are
 # actually enforced. When create=true the chart OWNS the namespace — install
