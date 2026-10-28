@@ -458,3 +458,56 @@ func TestSentinelAndExporterResources(t *testing.T) {
 		t.Errorf("exporter resources = %v, want %v", got, exporterRes)
 	}
 }
+
+// The Sentinel pods follow the data pods onto their nodes (node selector,
+// tolerations, node affinity) and take the image pull policy, but keep the
+// operator's pod anti-affinity and spread: the user's pod-level terms select
+// the data pods.
+func TestSentinelPodScheduling(t *testing.T) {
+	vc := sentinelCR()
+	vc.Spec.ImagePullPolicy = corev1.PullAlways
+	vc.Spec.NodeSelector = map[string]string{"pool": "valkey"}
+	vc.Spec.Tolerations = []corev1.Toleration{{Key: "dedicated", Operator: corev1.TolerationOpEqual, Value: "valkey", Effect: corev1.TaintEffectNoSchedule}}
+	nodeAffinity := &corev1.NodeAffinity{
+		RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+			NodeSelectorTerms: []corev1.NodeSelectorTerm{{MatchExpressions: []corev1.NodeSelectorRequirement{
+				{Key: "topology.kubernetes.io/zone", Operator: corev1.NodeSelectorOpIn, Values: []string{"a", "b", "c"}},
+			}}},
+		},
+	}
+	vc.Spec.Affinity = &corev1.Affinity{
+		NodeAffinity: nodeAffinity,
+		PodAntiAffinity: &corev1.PodAntiAffinity{
+			RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{{TopologyKey: topologyKeyHostname}},
+		},
+	}
+	vc.Spec.TopologySpreadConstraints = []corev1.TopologySpreadConstraint{{MaxSkew: 1, TopologyKey: topologyKeyHostname}}
+
+	pod := buildSentinelStatefulSet(vc, false).Spec.Template.Spec
+	if !equality.Semantic.DeepEqual(pod.NodeSelector, vc.Spec.NodeSelector) {
+		t.Errorf("sentinel nodeSelector = %v, want %v", pod.NodeSelector, vc.Spec.NodeSelector)
+	}
+	if !equality.Semantic.DeepEqual(pod.Tolerations, vc.Spec.Tolerations) {
+		t.Errorf("sentinel tolerations = %v, want %v", pod.Tolerations, vc.Spec.Tolerations)
+	}
+	if pod.Affinity == nil || !equality.Semantic.DeepEqual(pod.Affinity.NodeAffinity, nodeAffinity) {
+		t.Errorf("sentinel node affinity = %v, want %v", pod.Affinity, nodeAffinity)
+	}
+	if !equality.Semantic.DeepEqual(pod.Affinity.PodAntiAffinity, defaultAntiAffinity(vc).PodAntiAffinity) {
+		t.Errorf("sentinel pod anti-affinity = %v, want the operator default", pod.Affinity.PodAntiAffinity)
+	}
+	if !equality.Semantic.DeepEqual(pod.TopologySpreadConstraints, defaultTopologySpread(vc)) {
+		t.Errorf("sentinel spread = %v, want the operator default", pod.TopologySpreadConstraints)
+	}
+	for _, c := range append(pod.InitContainers, pod.Containers...) {
+		if c.ImagePullPolicy != corev1.PullAlways {
+			t.Errorf("%s imagePullPolicy = %q, want Always", c.Name, c.ImagePullPolicy)
+		}
+	}
+
+	// Without spec.affinity the Sentinels keep just the default anti-affinity.
+	vc.Spec.Affinity = nil
+	if a := buildSentinelStatefulSet(vc, false).Spec.Template.Spec.Affinity; a.NodeAffinity != nil {
+		t.Errorf("sentinel node affinity without spec.affinity = %v, want none", a.NodeAffinity)
+	}
+}

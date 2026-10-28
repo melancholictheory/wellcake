@@ -76,7 +76,8 @@ type ValkeyClusterSpec struct {
 	// +optional
 	Image string `json:"image,omitempty"`
 
-	// ImagePullPolicy for the Valkey container.
+	// ImagePullPolicy for the Valkey containers, and the Sentinel containers in
+	// the Sentinel topology.
 	// +kubebuilder:default=IfNotPresent
 	// +optional
 	ImagePullPolicy corev1.PullPolicy `json:"imagePullPolicy,omitempty"`
@@ -159,20 +160,25 @@ type ValkeyClusterSpec struct {
 	// +optional
 	Config map[string]string `json:"config,omitempty"`
 
-	// NodeSelector for Valkey pods.
+	// NodeSelector for Valkey pods, and the Sentinel pods in the Sentinel
+	// topology.
 	// +optional
 	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
 
-	// Tolerations for Valkey pods.
+	// Tolerations for Valkey pods, and the Sentinel pods in the Sentinel
+	// topology.
 	// +optional
 	Tolerations []corev1.Toleration `json:"tolerations,omitempty"`
 
 	// Affinity for Valkey pods. If nil the operator applies pod anti-affinity by default.
+	// In the Sentinel topology the Sentinel pods take its node affinity only, on
+	// top of the default pod anti-affinity.
 	// +optional
 	Affinity *corev1.Affinity `json:"affinity,omitempty"`
 
 	// TopologySpreadConstraints to spread pods across zones/DCs.
 	// If nil the operator applies a default hostname spread across availability zones.
+	// The Sentinel pods always use the default spread.
 	// +optional
 	TopologySpreadConstraints []corev1.TopologySpreadConstraint `json:"topologySpreadConstraints,omitempty"`
 
