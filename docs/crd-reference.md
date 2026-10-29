@@ -18,7 +18,7 @@ Short names: `vk`, `vkc`. Printer columns: `Topology`, `Replicas`,
 | `topology`                    | `Standalone\|Replication\|Sentinel\|Cluster` | `Replication` | **Immutable** (CEL). |
 | `profile`                     | `Cache\|Durable`           | `Cache`        | **Immutable** (CEL). Controls persistence/eviction/PVC-size defaults. |
 | `image`                       | string                     | `valkey/valkey:8.0` | |
-| `imagePullPolicy`             | `Always\|Never\|IfNotPresent` | `IfNotPresent` | |
+| `imagePullPolicy`             | `Always\|Never\|IfNotPresent` | `IfNotPresent` | Valkey containers, and the Sentinel containers. |
 | `imagePullSecrets`            | []corev1.LocalObjectReference | —          | Secrets in the same namespace, set on every operator-managed pod (Valkey/Sentinel StatefulSets, backup CronJob, restore and cluster-operation Jobs). Changing it rolls the pods. |
 | `replicas`                    | int32 ≥1                   | 3              | Total pods for Standalone/Replication/Sentinel; ignored for Cluster (computed from shards). |
 | `shards`                      | int32 ≥3                   | —              | **Required** when `topology=Cluster`. Forbidden otherwise (CEL). |
@@ -53,9 +53,9 @@ Short names: `vk`, `vkc`. Printer columns: `Topology`, `Replicas`,
 | `metrics.serviceMonitor`      | bool                       | `false`        | Creates a ServiceMonitor (Prometheus Operator) via unstructured; if the CRDs are not installed it is simply skipped. |
 | `metrics.resources`           | k8s ResourceRequirements   | —              | Applied to the exporter sidecar. Unset → no requests or limits. Changing it rolls the data pods. |
 | `config`                      | map[string]string          | —              | Arbitrary Valkey directives, appended to `valkey.conf`. |
-| `nodeSelector` / `tolerations`| standard                   | —              | |
-| `affinity`                    | *corev1.Affinity           | hostname anti-affinity | |
-| `topologySpreadConstraints`   | []corev1.TopologySpreadConstraint | zone spread, ScheduleAnyway | |
+| `nodeSelector` / `tolerations`| standard                   | —              | Data pods and Sentinel pods. |
+| `affinity`                    | *corev1.Affinity           | hostname anti-affinity | Data pods. Sentinel pods take only its `nodeAffinity`, on top of the default anti-affinity. |
+| `topologySpreadConstraints`   | []corev1.TopologySpreadConstraint | zone spread, ScheduleAnyway | Data pods. Sentinel pods keep the default. |
 | `podDisruptionBudget`         | `PDBSpec`                  | auto when replicas>1 | Covers the data pods. In the Sentinel topology the Sentinel pods get their own `<name>-sentinel-pdb` with `maxUnavailable: 1`. `enabled` switches both off; `maxUnavailable` and `minAvailable` apply to the data pods only. |
 | `podDisruptionBudget.enabled` | bool                       | `true`         | |
 | `podDisruptionBudget.maxUnavailable` / `minAvailable` | IntOrString | `1` / nil | |
