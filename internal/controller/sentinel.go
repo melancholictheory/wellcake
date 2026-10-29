@@ -461,16 +461,18 @@ func buildSentinelStatefulSet(vc *cachev1beta1.ValkeyCluster, proactive bool) *a
 					InitContainers: []corev1.Container{{
 						Name:            "sentinel-init",
 						Image:           image,
+						ImagePullPolicy: vc.Spec.ImagePullPolicy,
 						Command:         []string{shellCmd, "-c", renderSentinelInitScript(vc)},
 						Env:             sentinelInitEnv(vc),
 						VolumeMounts:    volumeMounts,
 						SecurityContext: containerSecurityContext(vc),
 					}},
 					Containers: []corev1.Container{{
-						Name:    componentSentinel,
-						Image:   image,
-						Command: []string{"valkey-server"},
-						Args:    []string{dataMountPath + "/runtime-sentinel.conf", "--sentinel"},
+						Name:            componentSentinel,
+						Image:           image,
+						ImagePullPolicy: vc.Spec.ImagePullPolicy,
+						Command:         []string{"valkey-server"},
+						Args:            []string{dataMountPath + "/runtime-sentinel.conf", "--sentinel"},
 						Ports: []corev1.ContainerPort{{
 							Name:          componentSentinel,
 							ContainerPort: port,
@@ -485,13 +487,29 @@ func buildSentinelStatefulSet(vc *cachev1beta1.ValkeyCluster, proactive bool) *a
 					Volumes:                   volumes,
 					ImagePullSecrets:          vc.Spec.ImagePullSecrets,
 					SecurityContext:           podSecurityContext(vc),
-					Affinity:                  defaultAntiAffinity(vc),
+					NodeSelector:              vc.Spec.NodeSelector,
+					Tolerations:               vc.Spec.Tolerations,
+					Affinity:                  sentinelAffinity(vc),
 					TopologySpreadConstraints: defaultTopologySpread(vc),
 				},
 			},
 			VolumeClaimTemplates: []corev1.PersistentVolumeClaim{pvc},
 		},
 	}
+}
+
+// sentinelAffinity is the default pod anti-affinity plus the node affinity of
+// spec.affinity, so the Sentinels can be pinned to the same nodes as the data
+// pods. The pod (anti-)affinity terms of spec.affinity are not reused: their
+// label selectors are written for the data pods, and applied to the Sentinels
+// too they can leave them unschedulable (a required anti-affinity on the
+// instance label would need a node per data pod and per Sentinel).
+func sentinelAffinity(vc *cachev1beta1.ValkeyCluster) *corev1.Affinity {
+	a := defaultAntiAffinity(vc)
+	if vc.Spec.Affinity != nil {
+		a.NodeAffinity = vc.Spec.Affinity.NodeAffinity.DeepCopy()
+	}
+	return a
 }
 
 // sentinelTimings returns the SENTINEL SET options the operator keeps in sync on

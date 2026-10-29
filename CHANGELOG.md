@@ -17,6 +17,27 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   unless listed in `egress.extra`, appended as is. It is opt-in: the backup
   upload, `restoreFrom` and `replicateFrom` need `extra` rules. The
   valkey-cluster chart exposes it as `networkPolicy.egress`.
+- The valkey-cluster chart sets annotations on the `ValkeyCluster` resource
+  (`annotations`), so the operator's annotations can come from the chart
+  values: `valkey.wellcake.io/proactive-rollout`, the request annotations
+  (`restart`, `rotate-password`, `failover`, `reshard`), each acted on once per
+  new value, and `valkey.wellcake.io/accept-replication-durability-risk`,
+  without which the webhook rejects a new cluster with `profile: Durable` on
+  the Replication topology.
+
+### Fixed
+
+- In the Sentinel topology the Sentinel pods ignored `spec.nodeSelector`,
+  `spec.tolerations`, `spec.affinity` and `spec.imagePullPolicy`. On nodes
+  reserved with a taint, the data pods were scheduled there and the Sentinels
+  were left Pending or placed elsewhere. The Sentinel pods now take the node
+  selector and the tolerations, the node affinity of `spec.affinity` on top of
+  the default pod anti-affinity, and the image pull policy on the Sentinel and
+  `sentinel-init` containers. The pod (anti-)affinity terms of `spec.affinity`
+  and `spec.topologySpreadConstraints` still only apply to the data pods: their
+  label selectors target the data pods. Upgrading changes the Sentinel pod
+  template (the pull policy is always set), so the Sentinel pods restart once,
+  one at a time.
 
 ## [0.12.3]
 

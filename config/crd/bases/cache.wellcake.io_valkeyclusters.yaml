@@ -59,8 +59,10 @@ spec:
             description: ValkeyClusterSpec defines the desired state of ValkeyCluster.
             properties:
               affinity:
-                description: Affinity for Valkey pods. If nil the operator applies
-                  pod anti-affinity by default.
+                description: |-
+                  Affinity for Valkey pods. If nil the operator applies pod anti-affinity by default.
+                  In the Sentinel topology the Sentinel pods take its node affinity only, on
+                  top of the default pod anti-affinity.
                 properties:
                   nodeAffinity:
                     description: Describes node affinity scheduling rules for the
@@ -1286,7 +1288,9 @@ spec:
                 type: string
               imagePullPolicy:
                 default: IfNotPresent
-                description: ImagePullPolicy for the Valkey container.
+                description: |-
+                  ImagePullPolicy for the Valkey containers, and the Sentinel containers in
+                  the Sentinel topology.
                 type: string
               imagePullSecrets:
                 description: |-
@@ -2042,7 +2046,9 @@ spec:
               nodeSelector:
                 additionalProperties:
                   type: string
-                description: NodeSelector for Valkey pods.
+                description: |-
+                  NodeSelector for Valkey pods, and the Sentinel pods in the Sentinel
+                  topology.
                 type: object
               perShardWorkload:
                 description: |-
@@ -2741,7 +2747,9 @@ spec:
                     type: boolean
                 type: object
               tolerations:
-                description: Tolerations for Valkey pods.
+                description: |-
+                  Tolerations for Valkey pods, and the Sentinel pods in the Sentinel
+                  topology.
                 items:
                   description: |-
                     The pod this Toleration is attached to tolerates any taint that matches
@@ -2799,6 +2807,7 @@ spec:
                 description: |-
                   TopologySpreadConstraints to spread pods across zones/DCs.
                   If nil the operator applies a default hostname spread across availability zones.
+                  The Sentinel pods always use the default spread.
                 items:
                   description: TopologySpreadConstraint specifies how to spread matching
                     pods among the given topology.
@@ -3273,8 +3282,10 @@ spec:
             description: ValkeyClusterSpec defines the desired state of ValkeyCluster.
             properties:
               affinity:
-                description: Affinity for Valkey pods. If nil the operator applies
-                  pod anti-affinity by default.
+                description: |-
+                  Affinity for Valkey pods. If nil the operator applies pod anti-affinity by default.
+                  In the Sentinel topology the Sentinel pods take its node affinity only, on
+                  top of the default pod anti-affinity.
                 properties:
                   nodeAffinity:
                     description: Describes node affinity scheduling rules for the
@@ -4500,7 +4511,9 @@ spec:
                 type: string
               imagePullPolicy:
                 default: IfNotPresent
-                description: ImagePullPolicy for the Valkey container.
+                description: |-
+                  ImagePullPolicy for the Valkey containers, and the Sentinel containers in
+                  the Sentinel topology.
                 type: string
               imagePullSecrets:
                 description: |-
@@ -5258,7 +5271,9 @@ spec:
               nodeSelector:
                 additionalProperties:
                   type: string
-                description: NodeSelector for Valkey pods.
+                description: |-
+                  NodeSelector for Valkey pods, and the Sentinel pods in the Sentinel
+                  topology.
                 type: object
               perShardWorkload:
                 description: |-
@@ -5997,7 +6012,9 @@ spec:
                     type: boolean
                 type: object
               tolerations:
-                description: Tolerations for Valkey pods.
+                description: |-
+                  Tolerations for Valkey pods, and the Sentinel pods in the Sentinel
+                  topology.
                 items:
                   description: |-
                     The pod this Toleration is attached to tolerates any taint that matches
@@ -6055,6 +6072,7 @@ spec:
                 description: |-
                   TopologySpreadConstraints to spread pods across zones/DCs.
                   If nil the operator applies a default hostname spread across availability zones.
+                  The Sentinel pods always use the default spread.
                 items:
                   description: TopologySpreadConstraint specifies how to spread matching
                     pods among the given topology.

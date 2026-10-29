@@ -5,6 +5,12 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "valkey-cluster.labels" . | nindent 4 }}
+  {{- with .Values.annotations }}
+  annotations:
+    {{- range $k, $v := . }}
+    {{ $k }}: {{ $v | quote }}
+    {{- end }}
+  {{- end }}
 spec:
   topology: {{ .Values.topology }}
   profile: {{ .Values.profile }}
