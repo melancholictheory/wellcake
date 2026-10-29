@@ -18,6 +18,16 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- A data pod is no longer Ready while it does not hold the data yet (#88).
+  The readiness probe was a TCP check (a `PING` with TLS), so a replica turned
+  Ready as soon as its port opened, before its full resync was done. A rolling
+  update could then restart the primary while the replica to promote was still
+  loading, leaving the cluster without a primary until the resync ended. The
+  readiness probe now runs `valkey-cli INFO persistence replication` and fails
+  while the pod loads an RDB (`loading:1`) or receives one from its primary
+  (`master_sync_in_progress:1`). `master_link_status` is left out, since every
+  replica has its link down during a failover. The liveness probe and the
+  Sentinel probes are unchanged. The data pods restart once on upgrade.
 - In the Sentinel topology the Sentinel pods ignored `spec.nodeSelector`,
   `spec.tolerations`, `spec.affinity` and `spec.imagePullPolicy`. On nodes
   reserved with a taint, the data pods were scheduled there and the Sentinels

@@ -1218,15 +1218,17 @@ func buildStatefulSet(vc *cachev1beta1.ValkeyCluster, configHash string, proacti
 	valkeyCommand := []string{"valkey-server"}
 	valkeyArgs := []string{dataMountPath + "/runtime.conf"}
 	valkeyEnv := envVars
+	// The readiness probe (and the Sentinel primary guard) talk to the local
+	// server, which asks for the password when auth is on.
+	if vc.Spec.AuthEnabled() {
+		valkeyEnv = append(append([]corev1.EnvVar(nil), envVars...), corev1.EnvVar{
+			Name:      envValkeyPassword,
+			ValueFrom: secretRef(authSecretName(vc), secretKeyPassword),
+		})
+	}
 	if sentinelPrimaryGuardActive(vc) {
 		valkeyCommand = []string{shellCmd, "-c", renderSentinelPrimaryGuard(vc)}
 		valkeyArgs = nil
-		if vc.Spec.AuthEnabled() {
-			valkeyEnv = append(append([]corev1.EnvVar(nil), envVars...), corev1.EnvVar{
-				Name:      envValkeyPassword,
-				ValueFrom: secretRef(authSecretName(vc), secretKeyPassword),
-			})
-		}
 	}
 	valkeyContainer := corev1.Container{
 		Name:            appValkey,
@@ -1241,7 +1243,7 @@ func buildStatefulSet(vc *cachev1beta1.ValkeyCluster, configHash string, proacti
 			{Name: configVolumeName, MountPath: configMountPath, ReadOnly: true},
 			{Name: dataVolumeName, MountPath: dataMountPath},
 		},
-		ReadinessProbe: valkeyProbe(vc, port, 5, 5),
+		ReadinessProbe: dataReadinessProbe(vc, port),
 		LivenessProbe:  valkeyProbe(vc, port, 15, 20),
 	}
 	if tlsEnabled(vc) {
@@ -1696,6 +1698,34 @@ func defaultAntiAffinity(vc *cachev1beta1.ValkeyCluster) *corev1.Affinity {
 				},
 			}},
 		},
+	}
+}
+
+// dataReadinessProbe keeps a data pod not Ready while it does not hold the data
+// yet: while it loads an RDB (loading:1, from disk or from a full resync) and
+// while a replica receives one from its primary (master_sync_in_progress:1).
+// A TCP check passes as soon as the port opens, so a rolling update could move
+// on and restart the primary while the replica to promote is still loading.
+// master_link_status is left out on purpose: during a failover every replica
+// has its link down at once. An error reply (NOAUTH after an in-place password
+// rotation) does not show these fields, so it does not fail the probe; only a
+// server that does not answer does.
+func dataReadinessProbe(vc *cachev1beta1.ValkeyCluster, port int32) *corev1.Probe {
+	cli := "valkey-cli -p " + strconv.Itoa(int(port))
+	if tlsEnabled(vc) {
+		cli += " --tls --insecure --cert " + tlsMountPath + "/" + secretKeyTLSCert + " --key " + tlsMountPath + "/" + secretKeyTLSKey
+	}
+	if vc.Spec.AuthEnabled() {
+		cli += noAuthWarningArgs
+	}
+	script := "out=$(" + cli + " INFO persistence replication) || exit 1\n" +
+		"! printf '%s\\n' \"$out\" | tr -d '\\r' | grep -qE '^(loading|master_sync_in_progress):1$'"
+	return &corev1.Probe{
+		ProbeHandler:        corev1.ProbeHandler{Exec: &corev1.ExecAction{Command: []string{shellCmd, "-c", script}}},
+		InitialDelaySeconds: 5,
+		PeriodSeconds:       5,
+		TimeoutSeconds:      3,
+		FailureThreshold:    5,
 	}
 }
 
