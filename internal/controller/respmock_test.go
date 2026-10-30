@@ -73,6 +73,25 @@ func (m *respMock) recorded(prefix string) []string {
 	return nil
 }
 
+// setInfo changes the INFO reply while the mock is serving.
+func (m *respMock) setInfo(info string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.infoReplication = info
+}
+
+// commandHeads returns the first two words of each recorded command, in order,
+// e.g. "CLIENT PAUSE" or "REPLICAOF r1".
+func (m *respMock) commandHeads() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]string, 0, len(m.commands))
+	for _, c := range m.commands {
+		out = append(out, strings.ToUpper(strings.Join(c[:min(2, len(c))], " ")))
+	}
+	return out
+}
+
 func (m *respMock) serve() {
 	for {
 		conn, err := m.ln.Accept()
@@ -106,7 +125,10 @@ func (m *respMock) handle(conn net.Conn) {
 		case "PING":
 			_, _ = io.WriteString(conn, "+PONG\r\n")
 		case "INFO":
-			writeBulk(conn, m.infoReplication)
+			m.mu.Lock()
+			info := m.infoReplication
+			m.mu.Unlock()
+			writeBulk(conn, info)
 		case "CLUSTER":
 			writeBulk(conn, m.clusterNodes)
 		case "SENTINEL":

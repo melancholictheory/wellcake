@@ -8,6 +8,17 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The proactive rollout of the Sentinel topology no longer loses writes when it
+  hands the master over. It ran `SENTINEL FAILOVER` while the master kept
+  taking writes: the Sentinels promoted a replica that could lack the last
+  ones, and the old master took more until they demoted it, 10 to 14s later.
+  The operator now pauses the master's writes (`CLIENT PAUSE ... WRITE`, 15s at
+  most), waits for every replica to reach its offset, runs `SENTINEL FAILOVER`,
+  points the old master at the replica the Sentinels promoted, and lifts the
+  pause. The held writes fail with `READONLY` and the clients move to the new
+  master; a client sees a few seconds of latency instead of lost writes. If
+  the replicas do not catch up within 5s, the pause is lifted and the handover
+  retried on the next pass.
 - In the Sentinel topology, the Sentinel StatefulSet now follows the
   `valkey.wellcake.io/proactive-rollout` annotation when it is set or removed
   on an existing cluster. Its update strategy was only applied when the
