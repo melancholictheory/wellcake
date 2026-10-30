@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims to
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.13.1]
 
 ### Fixed
 
@@ -613,6 +613,7 @@ First public release of the operator. Highlights of the initial feature set:
 - CEL XValidation for immutable and conditional fields; config-hash-driven
   rolling restarts; version-gated Valkey 9.x resilience directives.
 
+[0.13.1]: https://github.com/melancholictheory/wellcake/releases/tag/v0.13.1
 [0.13.0]: https://github.com/melancholictheory/wellcake/releases/tag/v0.13.0
 [0.12.3]: https://github.com/melancholictheory/wellcake/releases/tag/v0.12.3
 [0.12.2]: https://github.com/melancholictheory/wellcake/releases/tag/v0.12.2
