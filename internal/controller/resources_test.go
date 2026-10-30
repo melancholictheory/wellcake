@@ -1903,6 +1903,78 @@ func TestImagePullSecretsPropagateToEveryPod(t *testing.T) {
 	}
 }
 
+// spec.podLabels must reach every operator-managed pod: a label-based firewall
+// that lets the backup pods reach the bucket is useless if the backup CronJob
+// pods do not carry the label. The operator's own labels must win, or a user
+// label could move a pod out of its StatefulSet selector or Services.
+func TestPodLabelsPropagateToEveryPod(t *testing.T) {
+	podLabels := map[string]string{"example.com/egress-s3": "allow", nameLabel: "other"}
+	withLabels := func(vc *cachev1beta1.ValkeyCluster) *cachev1beta1.ValkeyCluster {
+		vc.Spec.PodLabels = podLabels
+		return vc
+	}
+
+	cvc := withLabels(minimalCR())
+	cvc.Spec.Topology = cachev1beta1.TopologyCluster
+	cvc.Spec.Shards = ptr.To[int32](3)
+	cvc.Spec.ReplicasPerShard = ptr.To[int32](1)
+	cvc.Status.LastAppliedReplicas = 8
+
+	bvc := withLabels(minimalCR())
+	bvc.Spec.Backup = &cachev1beta1.BackupSpec{
+		Enabled:  true,
+		Schedule: "0 0 * * *",
+		S3:       &cachev1beta1.S3Spec{Bucket: "b", Region: "r", CredentialsSecret: "creds"},
+	}
+
+	rvc := withLabels(minimalCR())
+	rvc.Spec.Topology = cachev1beta1.TopologyCluster
+	rvc.Spec.Shards = ptr.To[int32](3)
+	rvc.Spec.RestoreFrom = &cachev1beta1.RestoreSpec{
+		SourceKey: "base-stamp-shard-{shard}.rdb",
+		S3:        &cachev1beta1.S3Spec{Bucket: "bkt", Region: "r", CredentialsSecret: "c"},
+	}
+
+	sts := buildStatefulSet(withLabels(minimalCR()), "h", false)
+	shard := buildShardStatefulSet(cvc, 0, "h", false)
+	sen := buildSentinelStatefulSet(withLabels(sentinelCR()), false)
+	pods := map[string]map[string]string{
+		"statefulset": sts.Spec.Template.Labels,
+		"shard":       shard.Spec.Template.Labels,
+		"sentinel":    sen.Spec.Template.Labels,
+		"bootstrap":   buildBootstrapJob(cvc, "pw", "b").Spec.Template.Labels,
+		"scaleup":     buildScaleUpJob(cvc, "pw", "u").Spec.Template.Labels,
+		"scaledown":   buildScaleDownJob(cvc, "pw", "d").Spec.Template.Labels,
+		"reshard":     buildReshardJob(cvc, "pw", "r").Spec.Template.Labels,
+		"pershard":    buildClusterOpJob(cvc, "n", "op", "pw", "echo hi").Spec.Template.Labels,
+		"backup":      buildBackupCronJob(bvc, "b").Spec.JobTemplate.Spec.Template.Labels,
+		"restore":     buildRestoreAssemblyJob(rvc, "pw", "r").Spec.Template.Labels,
+	}
+	for name, got := range pods {
+		t.Run(name, func(t *testing.T) {
+			if got["example.com/egress-s3"] != "allow" {
+				t.Errorf("%s pod labels = %v, want example.com/egress-s3=allow", name, got)
+			}
+			if got[nameLabel] != appValkey {
+				t.Errorf("%s pod label %s = %q, want the operator's %q", name, nameLabel, got[nameLabel], appValkey)
+			}
+		})
+	}
+
+	// The selectors keep the operator's labels only.
+	for name, s := range map[string]*appsv1.StatefulSet{"statefulset": sts, "shard": shard, "sentinel": sen} {
+		if _, ok := s.Spec.Selector.MatchLabels["example.com/egress-s3"]; ok {
+			t.Errorf("%s selector must not take podLabels: %v", name, s.Spec.Selector.MatchLabels)
+		}
+	}
+
+	// Unset → the labels are unchanged, so upgrading the operator triggers no
+	// rollout.
+	if got, want := buildStatefulSet(minimalCR(), "h", false).Spec.Template.Labels, labelsFor(minimalCR()); !equality.Semantic.DeepEqual(got, want) {
+		t.Errorf("pod labels with podLabels unset = %v, want %v", got, want)
+	}
+}
+
 // spec.metrics.imagePullPolicy applies to the exporter sidecar only; the Valkey
 // containers keep spec.imagePullPolicy.
 func TestMetricsImagePullPolicy(t *testing.T) {

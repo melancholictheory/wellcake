@@ -456,7 +456,7 @@ func buildSentinelStatefulSet(vc *cachev1beta1.ValkeyCluster, proactive bool) *a
 			ServiceName:    sentinelStatefulSetName(vc),
 			Selector:       &metav1.LabelSelector{MatchLabels: labels},
 			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{Labels: sentinelPodLabels(vc)},
+				ObjectMeta: metav1.ObjectMeta{Labels: podLabelsFor(vc, sentinelPodLabels(vc))},
 				Spec: corev1.PodSpec{
 					InitContainers: []corev1.Container{{
 						Name:            "sentinel-init",

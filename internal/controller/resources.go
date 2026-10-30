@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"sort"
 	"strconv"
 	"strings"
@@ -137,6 +138,18 @@ func labelsFor(vc *cachev1beta1.ValkeyCluster) map[string]string {
 		managedByLabel: operatorName,
 		componentLabel: strings.ToLower(string(vc.Spec.Topology)),
 	}
+}
+
+// podLabelsFor returns the labels of a pod template: spec.podLabels, with the
+// operator's own labels on top, so a user label never replaces one that a
+// selector or a Service relies on. Left unset, the labels are unchanged.
+func podLabelsFor(vc *cachev1beta1.ValkeyCluster, labels map[string]string) map[string]string {
+	if len(vc.Spec.PodLabels) == 0 {
+		return labels
+	}
+	out := maps.Clone(vc.Spec.PodLabels)
+	maps.Copy(out, labels)
+	return out
 }
 
 func headlessServiceName(vc *cachev1beta1.ValkeyCluster) string {
@@ -1353,7 +1366,7 @@ func buildStatefulSet(vc *cachev1beta1.ValkeyCluster, configHash string, proacti
 			UpdateStrategy: updateStrategyFor(proactive),
 			Selector:       &metav1.LabelSelector{MatchLabels: labels},
 			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{Labels: labels, Annotations: podAnnotations},
+				ObjectMeta: metav1.ObjectMeta{Labels: podLabelsFor(vc, labels), Annotations: podAnnotations},
 				Spec: corev1.PodSpec{
 					InitContainers:                initContainers,
 					Containers:                    containers,

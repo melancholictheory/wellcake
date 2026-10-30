@@ -280,7 +280,7 @@ echo "manifest:"; cat /work/manifest.txt
 			BackoffLimit:            ptr.To[int32](3),
 			TTLSecondsAfterFinished: ptr.To[int32](600),
 			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{Labels: labels},
+				ObjectMeta: metav1.ObjectMeta{Labels: podLabelsFor(vc, labels)},
 				Spec: corev1.PodSpec{
 					RestartPolicy: corev1.RestartPolicyOnFailure,
 					InitContainers: []corev1.Container{{

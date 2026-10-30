@@ -20,6 +20,7 @@ Short names: `vk`, `vkc`. Printer columns: `Topology`, `Replicas`,
 | `image`                       | string                     | `valkey/valkey:8.0` | |
 | `imagePullPolicy`             | `Always\|Never\|IfNotPresent` | `IfNotPresent` | Valkey containers, and the Sentinel containers. |
 | `imagePullSecrets`            | []corev1.LocalObjectReference | —          | Secrets in the same namespace, set on every operator-managed pod (Valkey/Sentinel StatefulSets, backup CronJob, restore and cluster-operation Jobs). Changing it rolls the pods. |
+| `podLabels`                   | map[string]string          | —              | Extra labels on every operator-managed pod (Valkey/Sentinel StatefulSets, backup CronJob, restore and cluster-operation Jobs), e.g. for a label-based network policy or firewall. The operator's own labels win on a key conflict. Changing it rolls the pods. |
 | `replicas`                    | int32 ≥1                   | 3              | Total pods for Standalone/Replication/Sentinel; ignored for Cluster (computed from shards). |
 | `shards`                      | int32 ≥3                   | —              | **Required** when `topology=Cluster`. Forbidden otherwise (CEL). |
 | `replicasPerShard`            | int32 ≥0                   | —              | Cluster only. Replicas per primary. |

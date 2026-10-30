@@ -86,6 +86,11 @@ type ValkeyClusterSpec struct {
 	// +optional
 	ImagePullSecrets []corev1.LocalObjectReference `json:"imagePullSecrets,omitempty"`
 
+	// PodLabels are extra labels on every operator-managed pod. Mirrors v1beta1
+	// so the field survives v1alpha1↔v1beta1 conversion.
+	// +optional
+	PodLabels map[string]string `json:"podLabels,omitempty"`
+
 	// Replicas is the number of Valkey instances.
 	// For Replication: 1 primary + (Replicas-1) replicas. For Cluster: total nodes (must be >=6 with Shards*ReplicasPerShard).
 	// +kubebuilder:default=3

@@ -277,7 +277,7 @@ func buildClusterOpJob(vc *cachev1beta1.ValkeyCluster, name, containerName, pass
 			BackoffLimit:            ptr.To[int32](3),
 			TTLSecondsAfterFinished: ptr.To[int32](600),
 			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{Labels: labelsFor(vc)},
+				ObjectMeta: metav1.ObjectMeta{Labels: podLabelsFor(vc, labelsFor(vc))},
 				Spec: corev1.PodSpec{
 					RestartPolicy: corev1.RestartPolicyOnFailure,
 					Containers: []corev1.Container{{
@@ -383,7 +383,7 @@ func buildShardStatefulSet(vc *cachev1beta1.ValkeyCluster, shard int32, configHa
 	sts.Spec.ServiceName = shardHeadlessName(vc, shard)
 	sts.Spec.Replicas = new(1 + replicasPerShardOf(vc))
 	sts.Spec.Selector = &metav1.LabelSelector{MatchLabels: sl}
-	sts.Spec.Template.Labels = sl
+	sts.Spec.Template.Labels = podLabelsFor(vc, sl)
 
 	// Apply shard-aware anti-affinity unless the user pinned their own affinity.
 	if vc.Spec.Affinity == nil {

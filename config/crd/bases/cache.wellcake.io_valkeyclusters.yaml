@@ -2085,6 +2085,13 @@ spec:
                     description: MinAvailable, mutually exclusive with MaxUnavailable.
                     x-kubernetes-int-or-string: true
                 type: object
+              podLabels:
+                additionalProperties:
+                  type: string
+                description: |-
+                  PodLabels are extra labels on every operator-managed pod. Mirrors v1beta1
+                  so the field survives v1alpha1↔v1beta1 conversion.
+                type: object
               podSecurityContext:
                 description: |-
                   PodSecurityContext sets the pod-level security context for Valkey pods.
@@ -5309,6 +5316,16 @@ spec:
                     - type: string
                     description: MinAvailable, mutually exclusive with MaxUnavailable.
                     x-kubernetes-int-or-string: true
+                type: object
+              podLabels:
+                additionalProperties:
+                  type: string
+                description: |-
+                  PodLabels are extra labels on every operator-managed pod: the Valkey and
+                  Sentinel pods, and the backup, restore and cluster-operation Job pods.
+                  For example the labels a label-based network policy or firewall selects,
+                  such as egress to the backup bucket. The operator's own labels win over
+                  a podLabels entry with the same key. Changing it rolls the pods.
                 type: object
               podSecurityContext:
                 description: |-

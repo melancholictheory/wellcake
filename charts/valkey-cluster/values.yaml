@@ -45,6 +45,13 @@ imagePullPolicy: IfNotPresent
 # imagePullSecrets:
 #   - name: regcred
 imagePullSecrets: []
+# Extra labels on every pod of the cluster (Valkey, Sentinel, backup/restore and
+# cluster-operation Jobs), e.g. for a label-based network policy or firewall.
+# Changing them rolls the pods.
+# Example:
+# podLabels:
+#   example.com/egress-s3: allow
+podLabels: {}
 
 # Number of pods (interpretation depends on topology).
 replicas: 3

@@ -20,6 +20,10 @@ spec:
   imagePullSecrets:
     {{- toYaml . | nindent 4 }}
   {{- end }}
+  {{- with .Values.podLabels }}
+  podLabels:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   replicas: {{ .Values.replicas }}
   {{- if eq .Values.topology "Cluster" }}
   shards: {{ .Values.shards }}
