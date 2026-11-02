@@ -2692,6 +2692,23 @@ spec:
               storage:
                 description: Storage configures persistence backed by PVCs.
                 properties:
+                  medium:
+                    default: Disk
+                    description: |-
+                      Medium selects what backs the data dir. "Disk" (default) provisions a PVC.
+                      "Memory" backs it with a tmpfs emptyDir (RAM): no PVC, no StorageClass, no
+                      PV-bind latency, and — crucially — it counts against the pod's memory limit
+                      rather than ephemeral-storage, so it does NOT trip the nodefs eviction that
+                      made plain (disk-backed) emptyDir unsafe under ephemeral-storage pressure. Intended for the Cache
+                      profile (ephemeral data); data does NOT survive a pod restart, so it is
+                      rejected for the Durable profile. Immutable.
+                    enum:
+                    - Disk
+                    - Memory
+                    type: string
+                    x-kubernetes-validations:
+                    - message: storage medium is immutable
+                      rule: self == oldSelf
                   mode:
                     default: rdb
                     description: 'Persistence mode: rdb, aof, both, none.'
@@ -2701,6 +2718,9 @@ spec:
                     - both
                     - none
                     type: string
+                    x-kubernetes-validations:
+                    - message: storage mode is immutable
+                      rule: self == oldSelf
                   size:
                     anyOf:
                     - type: integer
@@ -3001,6 +3021,8 @@ spec:
               rule: self.topology != 'Cluster' || has(self.shards)
             - message: shards is only valid when topology is Cluster
               rule: self.topology == 'Cluster' || !has(self.shards)
+            - message: replicasPerShard is only valid when topology is Cluster
+              rule: self.topology == 'Cluster' || !has(self.replicasPerShard)
             - message: sentinel is required when topology is Sentinel
               rule: self.topology != 'Sentinel' || has(self.sentinel)
             - message: sentinel is only valid when topology is Sentinel
@@ -3013,6 +3035,10 @@ spec:
                 spec.tls.enabled=true
               rule: '!has(self.replicateFrom) || !has(self.replicateFrom.caSecret)
                 || (self.replicateFrom.tls && has(self.tls) && self.tls.enabled)'
+            - message: storage.medium=Memory is ephemeral and not allowed with the
+                Durable profile
+              rule: '!has(self.storage) || !has(self.storage.medium) || self.storage.medium
+                != ''Memory'' || self.profile != ''Durable'''
             - message: perShardWorkload is only valid when topology is Cluster
               rule: '!has(self.perShardWorkload) || self.topology == ''Cluster'''
             - message: shards can only grow unless perShardWorkload=true (per-StatefulSet
@@ -3113,11 +3139,25 @@ spec:
                   the operator last acted on (Replication topology). Used to run a manual
                   failover exactly once per request.
                 type: string
+              lastPasswordRotationToken:
+                description: |-
+                  LastPasswordRotationToken is the value of the valkey.wellcake.io/rotate-password
+                  annotation the operator last acted on. Used to run an in-place password
+                  rotation (live CONFIG SET requirepass/masterauth, no restart) exactly once
+                  per request.
+                type: string
               lastReshardToken:
                 description: |-
                   LastReshardToken is the value of the valkey.wellcake.io/reshard annotation the
                   operator last acted on (Cluster topology). Used to run a manual reshard
                   exactly once per request.
+                type: string
+              lastTLSCertFingerprint:
+                description: |-
+                  LastTLSCertFingerprint is the SHA-256 fingerprint of the TLS leaf cert the
+                  operator last reloaded onto the live pods. When cert-manager renews the
+                  cert Secret this no longer matches, triggering an in-place TLS reload
+                  (live CONFIG SET tls-cert-file/tls-key-file/tls-ca-cert-file, no restart).
                 type: string
               observedGeneration:
                 description: ObservedGeneration is the .metadata.generation last reconciled.
@@ -3136,6 +3176,27 @@ spec:
               primary:
                 description: Primary holds the pod currently acting as primary (Replication/Sentinel
                   topologies).
+                type: string
+              primaryDownSince:
+                description: |-
+                  PrimaryDownSince is when the operator first observed the primary
+                  unreachable. It debounces operator-driven failover: a replica is promoted
+                  only after the primary has been down for at least the failover threshold,
+                  so a primary that is merely briefly busy (slow BGSAVE, GC pause) is not
+                  prematurely failed over. Cleared once a master is reachable again.
+                format: date-time
+                type: string
+              quorumDownSince:
+                description: |-
+                  QuorumDownSince is when the operator first observed the Cluster topology
+                  stuck in cluster_state:fail with a majority of primaries unreachable —
+                  the state gossip cannot self-heal, because authorizing a replica failover
+                  needs a master quorum that no longer exists. It debounces operator-driven
+                  quorum recovery (CLUSTER FAILOVER TAKEOVER): the operator only intervenes
+                  after the cluster has been stuck for the recovery threshold, giving gossip
+                  time to promote replicas on its own where a quorum still exists. Cleared
+                  once the cluster reports cluster_state:ok again.
+                format: date-time
                 type: string
               readyReplicas:
                 description: ReadyReplicas is the count of ready Valkey pods.

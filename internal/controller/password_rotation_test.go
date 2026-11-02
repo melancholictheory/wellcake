@@ -11,6 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	cachev1beta1 "github.com/melancholictheory/wellcake/api/v1beta1"
@@ -102,6 +103,57 @@ func TestPasswordRotationAPIReaderGuard(t *testing.T) {
 	}
 	if rotated {
 		t.Fatalf("expected APIReader guard to skip the already-done rotation")
+	}
+}
+
+// TestPasswordRotationWaitsForPods: a fresh token on a cluster whose data pods
+// are not all Ready (a cluster created with the annotation) is deferred without
+// an error, and without touching the Secret. An error here returned before the
+// reconcile created the StatefulSet, so such a cluster never came up.
+func TestPasswordRotationWaitsForPods(t *testing.T) {
+	scheme := newTestScheme(t)
+	vc := &cachev1beta1.ValkeyCluster{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "c", Namespace: "ns",
+			Annotations: map[string]string{rotatePasswordAnnotation: "t1"},
+		},
+		Spec: cachev1beta1.ValkeyClusterSpec{
+			Topology: cachev1beta1.TopologySentinel,
+			Replicas: 2,
+			Auth:     &cachev1beta1.AuthSpec{Enabled: new(true)},
+		},
+	}
+	pod := func(name string, ready bool) *corev1.Pod {
+		st := corev1.ConditionFalse
+		if ready {
+			st = corev1.ConditionTrue
+		}
+		return &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "ns", Labels: map[string]string{instanceLabel: "c", componentLabel: componentSentinel}},
+			Status:     corev1.PodStatus{Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: st}}},
+		}
+	}
+	sec := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: passwordSecretName(vc), Namespace: "ns"},
+		Data:       map[string][]byte{secretKeyPassword: []byte("old")},
+	}
+	for name, objs := range map[string][]client.Object{
+		"no pods yet":                  {vc, sec},
+		"one data pod not Ready":       {vc, sec, pod("c-0", true), pod("c-1", false)},
+		"Ready Sentinels do not count": {vc, sec, pod("c-0", true), pod("c-sentinel-0", true), pod("c-sentinel-1", true)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).Build()
+			r := &ValkeyClusterReconciler{Client: c, Scheme: scheme}
+			rotated, err := r.reconcilePasswordRotation(context.Background(), vc)
+			if err != nil || rotated {
+				t.Fatalf("want deferred (false, nil), got (%v, %v)", rotated, err)
+			}
+			var got corev1.Secret
+			if err := c.Get(context.Background(), types.NamespacedName{Namespace: "ns", Name: passwordSecretName(vc)}, &got); err != nil || string(got.Data[secretKeyPassword]) != "old" {
+				t.Fatalf("Secret must be untouched, got %q (%v)", got.Data[secretKeyPassword], err)
+			}
+		})
 	}
 }
 
