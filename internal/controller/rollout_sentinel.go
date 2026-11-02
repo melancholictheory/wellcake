@@ -288,6 +288,11 @@ func handOverMaster(ctx context.Context, dial func(host string) *replClient, fai
 		return fmt.Errorf("dial master %s failed", masterHost)
 	}
 	defer mc.close()
+	// Do not pause the writes for replicas that are not even linked: they cannot
+	// catch up, so the pause would only cost writes on every retry.
+	if info, err := mc.info(ctx); err != nil || !replicasLinked(info, len(replicaHosts)) {
+		return fmt.Errorf("not every replica is linked to the master %s", masterHost)
+	}
 	if err := mc.clientPauseWrite(ctx, t.pause); err != nil {
 		return fmt.Errorf("CLIENT PAUSE: %w", err)
 	}
@@ -342,6 +347,21 @@ func handOverMaster(ctx context.Context, dial func(host string) *replClient, fai
 		return fmt.Errorf("REPLICAOF %s on the old master: %w", promoted, err)
 	}
 	return nil
+}
+
+// replicasLinked reports whether a master's INFO replication lists at least
+// want replicas, all online (their offset may still lag).
+func replicasLinked(info map[string]string, want int) bool {
+	n, err := strconv.Atoi(info["connected_slaves"])
+	if err != nil || n < want {
+		return false
+	}
+	for i := range n {
+		if !strings.Contains(info["slave"+strconv.Itoa(i)], "state=online") {
+			return false
+		}
+	}
+	return true
 }
 
 // replicasCaughtUp reports whether a master's INFO replication lists at least

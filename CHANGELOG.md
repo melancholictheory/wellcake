@@ -4,6 +4,21 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims to
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Rollouts are safer when a replica cannot sync (#97):
+  - a replica whose link to its primary has been down since it started is no
+    longer Ready. It never synced and holds no data; a replica whose link drops
+    after a sync, as in a failover, stays Ready;
+  - the proactive handover no longer pauses the master's writes when a replica
+    is not linked to it, so a stuck handover no longer costs writes on every
+    retry;
+  - without `proactive-rollout`, the Sentinel StatefulSet waits for the data
+    StatefulSet to finish rolling before it rolls, so the two never restart at
+    once.
+
 ## [0.14.0]
 
 ### Added

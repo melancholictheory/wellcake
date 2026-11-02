@@ -131,13 +131,19 @@ func (r *ValkeyClusterReconciler) reconcileSentinel(ctx context.Context, vc *cac
 	if err := r.ensureSentinelService(ctx, vc); err != nil {
 		return ctrl.Result{}, fmt.Errorf("sentinel service: %w", err)
 	}
-	sentinelSTS, err := r.ensureSentinelStatefulSet(ctx, vc, sentinelHash)
+	// With RollingUpdate, both StatefulSets would roll at once when both
+	// templates change (an operator upgrade): a primary restarting while the
+	// Sentinels restart leaves no Sentinel to fail over, and they may not even
+	// find each other again (#97). Hold the Sentinels' new template until the
+	// data plane has rolled. The proactive rollout already orders the planes.
+	holdSentinels := !proactiveRolloutEnabled(vc) && statefulSetRolling(sts)
+	sentinelSTS, err := r.ensureSentinelStatefulSet(ctx, vc, sentinelHash, holdSentinels)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("sentinel statefulset: %w", err)
 	}
 	// Sentinel topology has no periodic requeue, so retry until every Sentinel
 	// runs the configured timings.
-	sentinelPending := r.applySentinelTimings(ctx, vc, password)
+	sentinelPending := r.applySentinelTimings(ctx, vc, password) || holdSentinels
 	// Drop dead Sentinel peers and replica entries, one Sentinel at a time.
 	views := r.collectSentinelViews(ctx, vc, password)
 	if r.resetStaleSentinels(ctx, vc, password, views) {
@@ -366,7 +372,7 @@ func (r *ValkeyClusterReconciler) sentinelPodsLabeled(ctx context.Context, vc *c
 	return true, nil
 }
 
-func (r *ValkeyClusterReconciler) ensureSentinelStatefulSet(ctx context.Context, vc *cachev1beta1.ValkeyCluster, configHash string) (*appsv1.StatefulSet, error) {
+func (r *ValkeyClusterReconciler) ensureSentinelStatefulSet(ctx context.Context, vc *cachev1beta1.ValkeyCluster, configHash string, holdTemplate bool) (*appsv1.StatefulSet, error) {
 	sts := buildSentinelStatefulSet(vc, proactiveRolloutEnabled(vc))
 	if configHash != "" {
 		sts.Spec.Template.Annotations = map[string]string{configHashAnnotation: configHash}
@@ -386,7 +392,9 @@ func (r *ValkeyClusterReconciler) ensureSentinelStatefulSet(ctx context.Context,
 		return nil, err
 	}
 	existing.Spec.Replicas = sts.Spec.Replicas
-	existing.Spec.Template = sts.Spec.Template
+	if !holdTemplate {
+		existing.Spec.Template = sts.Spec.Template
+	}
 	// OnDelete or RollingUpdate follows the proactive-rollout annotation, which
 	// can be set or removed on an existing cluster.
 	existing.Spec.UpdateStrategy = sts.Spec.UpdateStrategy
@@ -1001,4 +1009,19 @@ func (c *replClient) sentinelView(ctx context.Context, name string, scaledDown f
 		}
 	}
 	return v, nil
+}
+
+// statefulSetRolling reports whether a StatefulSet has a template change it has
+// not fully rolled out yet.
+func statefulSetRolling(sts *appsv1.StatefulSet) bool {
+	if sts == nil {
+		return false
+	}
+	want := int32(1)
+	if sts.Spec.Replicas != nil {
+		want = *sts.Spec.Replicas
+	}
+	st := sts.Status
+	return st.ObservedGeneration < sts.Generation || st.UpdateRevision != st.CurrentRevision ||
+		st.UpdatedReplicas < want || st.ReadyReplicas < want
 }
