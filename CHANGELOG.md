@@ -15,6 +15,24 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   accepts the password; the primary guard does the same. The proactive rollout
   also waits when more than one data pod reports `role:master` instead of
   picking one and rolling the other as a stale replica.
+- Turning `auth` on for a running cluster with replicas is now rejected (#97).
+  Each replica restarted with a password its primary did not have yet, never
+  synced, and still turned Ready, so a rollout could promote an empty replica
+  and lose all the data. Create a new cluster with auth enabled instead.
+  Standalone clusters, which have no replicas, can still turn auth on.
+- `v1alpha1` now has the same schema as `v1beta1` (#99). Five fields existed
+  only in `v1beta1`: `spec.storage.medium`, `status.lastPasswordRotationToken`,
+  `status.lastTLSCertFingerprint`, `status.primaryDownSince` and
+  `status.quorumDownSince`, and so did the CEL rules on `storage.mode` and
+  `storage.medium`. There is no
+  conversion webhook, so any write through `v1alpha1` (the valkey-cluster chart
+  renders `v1alpha1`) pruned these fields: a `helm upgrade` cleared the
+  password rotation token and the operator ran the same rotation again. A test
+  now fails when the two versions of a generated CRD differ.
+- A cluster created with `valkey.wellcake.io/rotate-password` already set now
+  comes up. The rotation ran before the StatefulSet was created, failed because
+  no pod existed yet, and the reconcile never got further. The rotation now
+  waits until every data pod is Ready.
 
 ## [0.14.0]
 
