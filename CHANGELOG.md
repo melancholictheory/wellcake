@@ -6,6 +6,14 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.14.1]
+
+### Added
+
+- The valkey-cluster chart sets `spec.restoreFrom` (`restoreFrom`), so a
+  cluster deployed with the chart can be created from an S3 backup. It is off
+  by default and renders nothing until `restoreFrom.enabled` is set.
+
 ### Fixed
 
 - In the Sentinel topology, `valkey.wellcake.io/rotate-password` now rotates the
@@ -69,9 +77,6 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   cannot collide with a label the selectors and Services rely on. Leaving it
   unset changes nothing, so upgrading the operator does not restart existing
   clusters. The `valkey-cluster` chart exposes it as `podLabels`.
-- The valkey-cluster chart sets `spec.restoreFrom` (`restoreFrom`), so a
-  cluster deployed with the chart can be created from an S3 backup. It is off
-  by default and renders nothing until `restoreFrom.enabled` is set.
 
 ### Changed
 
@@ -686,6 +691,7 @@ First public release of the operator. Highlights of the initial feature set:
 - CEL XValidation for immutable and conditional fields; config-hash-driven
   rolling restarts; version-gated Valkey 9.x resilience directives.
 
+[0.14.1]: https://github.com/melancholictheory/wellcake/releases/tag/v0.14.1
 [0.14.0]: https://github.com/melancholictheory/wellcake/releases/tag/v0.14.0
 [0.13.1]: https://github.com/melancholictheory/wellcake/releases/tag/v0.13.1
 [0.13.0]: https://github.com/melancholictheory/wellcake/releases/tag/v0.13.0
