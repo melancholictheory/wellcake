@@ -281,7 +281,7 @@ func (r *ValkeyClusterReconciler) ensureSentinelConfigMap(ctx context.Context, v
 		},
 		Data: map[string]string{sentinelConfigName: renderSentinelConf(vc, password)},
 	}
-	hash := sentinelConfigHash(cm.Data[sentinelConfigName])
+	hash := sentinelConfigHash(cm.Data[sentinelConfigName], sentinelPasswordRotatesLive(vc))
 	if err := controllerutil.SetControllerReference(vc, cm, r.Scheme); err != nil {
 		return "", err
 	}
@@ -302,10 +302,16 @@ func (r *ValkeyClusterReconciler) ensureSentinelConfigMap(ctx context.Context, v
 // change that only takes effect on restart (auth, TLS, port) rolls the Sentinel
 // pods. The ConfigMap only seeds runtime-sentinel.conf when a pod starts. The
 // timings are left out: applySentinelTimings sets them live with SENTINEL SET.
-func sentinelConfigHash(conf string) string {
+// With livePassword, so is the password: the in-place rotation sets it on the
+// running Sentinels, and a Sentinel that restarts reads the new one from the
+// ConfigMap, so a rotation does not restart the Sentinels.
+func sentinelConfigHash(conf string, livePassword bool) string {
 	var kept []string
 	for line := range strings.SplitSeq(conf, "\n") {
 		if strings.HasPrefix(line, "sentinel down-after-milliseconds ") || strings.HasPrefix(line, "sentinel failover-timeout ") {
+			continue
+		}
+		if livePassword && (strings.HasPrefix(line, "sentinel auth-pass ") || strings.HasPrefix(line, "requirepass ")) {
 			continue
 		}
 		kept = append(kept, line)
@@ -1009,6 +1015,61 @@ func (c *replClient) sentinelView(ctx context.Context, name string, scaledDown f
 		}
 	}
 	return v, nil
+}
+
+// sentinelPasswordRotatesLive reports whether the Sentinels' password changes
+// only through the in-place rotation (an operator-managed Secret). A
+// user-managed existingSecret is never rotated live, so a change to it still
+// has to roll the Sentinels.
+func sentinelPasswordRotatesLive(vc *cachev1beta1.ValkeyCluster) bool {
+	return vc.Spec.Auth == nil || vc.Spec.Auth.ExistingSecret == ""
+}
+
+// rotateSentinelPassword moves every Sentinel of the cluster from oldPw to
+// newPw, in one of three steps run around the data pods' own passes:
+//   - "add": the Sentinels accept both passwords (ACL SETUSER default >new);
+//   - "switch": they authenticate to the data pods (auth-pass) and to each
+//     other (sentinel-pass) with the new one;
+//   - "cutover": they drop the old one (ACL SETUSER default resetpass >new).
+//
+// Sentinel has no CONFIG SET, so requirepass itself cannot change live; the
+// ACL rule is what a client is checked against. A Sentinel that restarts
+// later reads the new requirepass from the ConfigMap.
+func (r *ValkeyClusterReconciler) rotateSentinelPassword(ctx context.Context, vc *cachev1beta1.ValkeyCluster, oldPw, newPw, step string) error {
+	if vc.Spec.Topology != cachev1beta1.TopologySentinel || vc.Spec.Sentinel == nil {
+		return nil
+	}
+	port := sentinelListenPort(vc)
+	cert := loadMTLSClientCert(ctx, r, vc)
+	log := logf.FromContext(ctx)
+	for i := int32(0); i < vc.Spec.Sentinel.Replicas; i++ {
+		host := sentinelPodFQDN(vc, i)
+		c := dialReplClient(ctx, host, port, oldPw, tlsEnabled(vc), cert, 5*time.Second)
+		if c == nil {
+			c = dialReplClient(ctx, host, port, newPw, tlsEnabled(vc), cert, 5*time.Second)
+		}
+		if c == nil {
+			return fmt.Errorf("rotate Sentinel %s: unreachable with current or new password", host)
+		}
+		var err error
+		switch step {
+		case "add":
+			err = c.rdb.Do(ctx, "ACL", "SETUSER", "default", ">"+newPw).Err()
+		case "switch":
+			err = c.rdb.Do(ctx, "SENTINEL", "SET", sentinelMasterName, "auth-pass", newPw).Err()
+			if err == nil {
+				err = c.rdb.Do(ctx, "SENTINEL", "CONFIG", "SET", "sentinel-pass", newPw).Err()
+			}
+		case "cutover":
+			err = c.rdb.Do(ctx, "ACL", "SETUSER", "default", "resetpass", ">"+newPw).Err()
+		}
+		c.close()
+		if err != nil {
+			return fmt.Errorf("rotate Sentinel %s (%s): %w", host, step, err)
+		}
+		log.Info("password rotation: applying to Sentinel", "step", step, "host", host)
+	}
+	return nil
 }
 
 // statefulSetRolling reports whether a StatefulSet has a template change it has

@@ -8,6 +8,17 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- In the Sentinel topology, `valkey.wellcake.io/rotate-password` now rotates the
+  Sentinels' password live too (#97). The rotation was applied to the data pods
+  only: the Sentinels kept the old password until they restarted, lost the
+  restarted data pods, and rejected clients using the new password. With
+  `proactive-rollout` the rollout then deadlocked with clients cut off; without
+  it both StatefulSets rolled at once and the cluster could lose all its data.
+  The Sentinels now accept both passwords, switch `auth-pass` and
+  `sentinel-pass`, then drop the old one, around the data pods' own passes.
+  The password no longer counts in the Sentinels' config hash (unless the
+  Secret is user-managed), so a rotation does not restart them; the data pods
+  still roll once.
 - Rollouts are safer when a replica cannot sync (#97):
   - a replica whose link to its primary has been down since it started is no
     longer Ready. It never synced and holds no data; a replica whose link drops

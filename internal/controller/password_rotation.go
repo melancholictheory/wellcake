@@ -188,8 +188,17 @@ func (r *ValkeyClusterReconciler) applyPasswordToPods(ctx context.Context, vc *c
 		return err
 	}
 
+	// Sentinels, between the data passes: they take the new password while the
+	// data pods accept both, so neither side ever rejects the other, and Sentinel
+	// clients keep working with the new password throughout.
+	for _, step := range []string{"add", "switch"} {
+		if err := r.rotateSentinelPassword(ctx, vc, oldPw, newPw, step); err != nil {
+			return err
+		}
+	}
+
 	// Pass 2: drop the old password, align requirepass, persist to the aclfile.
-	return onEachPod("cutover", func(c *replClient) error {
+	if err := onEachPod("cutover", func(c *replClient) error {
 		if err := c.aclSetDefaultPassword(ctx, newPw); err != nil {
 			return err
 		}
@@ -202,7 +211,10 @@ func (r *ValkeyClusterReconciler) applyPasswordToPods(ctx context.Context, vc *c
 			return err
 		}
 		return c.aclSave(ctx)
-	})
+	}); err != nil {
+		return err
+	}
+	return r.rotateSentinelPassword(ctx, vc, oldPw, newPw, "cutover")
 }
 
 // updatePasswordSecret rewrites the operator-managed password Secret in place.
