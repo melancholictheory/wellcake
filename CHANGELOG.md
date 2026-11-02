@@ -4,6 +4,24 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims to
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- `v1alpha1` now has the same schema as `v1beta1` (#99). Five fields existed
+  only in `v1beta1`: `spec.storage.medium`, `status.lastPasswordRotationToken`,
+  `status.lastTLSCertFingerprint`, `status.primaryDownSince` and
+  `status.quorumDownSince`, and so did the CEL rules on `storage.mode` and
+  `storage.medium`. There is no
+  conversion webhook, so any write through `v1alpha1` (the valkey-cluster chart
+  renders `v1alpha1`) pruned these fields: a `helm upgrade` cleared the
+  password rotation token and the operator ran the same rotation again. A test
+  now fails when the two versions of a generated CRD differ.
+- A cluster created with `valkey.wellcake.io/rotate-password` already set now
+  comes up. The rotation ran before the StatefulSet was created, failed because
+  no pod existed yet, and the reconcile never got further. The rotation now
+  waits until every data pod is Ready.
+
 ## [0.14.0]
 
 ### Added
