@@ -893,6 +893,7 @@ while :; do
   echo "waiting for the Sentinels to report a reachable primary (now $BEST_HOST:$BEST_PORT)"
   sleep 3
 done
+refuse_on_auth_rejection
 PRIMARY=""
 if [ -n "$BEST_HOST" ]; then
   if is_self "$BEST_HOST"; then
@@ -931,6 +932,10 @@ query_sentinels() {
   BEST_EPOCH=-1
   BEST_HOST=""
   BEST_PORT=""
+  # Sentinels that answered but rejected the password (NOAUTH/WRONGPASS). Such
+  # a reply is not "no Sentinel": the cluster exists and holds a primary, the
+  # password just does not match yet (rotation or auth change in progress).
+  AUTH_REJECTED=0
   # The Sentinel count is not rendered here: it would put spec.sentinel.replicas
   # in the pod template and roll the data pods on every Sentinel scale. Start
   # at the CRD minimum and raise the bound to what the Sentinels report.
@@ -938,6 +943,9 @@ query_sentinels() {
   n=3
   while [ "$i" -lt "$n" ]; do
     OUT=$(timeout 3 valkey-cli -h "$SEN-$i.$SEN" -p %[3]d%[4]s%[5]s SENTINEL MASTER %[6]s 2>/dev/null || true)
+    case "$OUT" in
+      *NOAUTH*|*WRONGPASS*) AUTH_REJECTED=$((AUTH_REJECTED + 1)) ;;
+    esac
     set -- $(printf '%%s\n' "$OUT" | awk 'NR %% 2 == 1 { k = $0 } NR %% 2 == 0 { v[k] = $0 } END { if (v["ip"] != "" && v["config-epoch"] ~ /^[0-9]+$/ && v["num-other-sentinels"] ~ /^[0-9]+$/) print v["ip"], v["port"], v["config-epoch"], v["num-other-sentinels"] }')
     if [ "$#" -eq 4 ]; then
       if [ "$(($4 + 1))" -gt "$n" ]; then
@@ -951,6 +959,15 @@ query_sentinels() {
     fi
     i=$((i + 1))
   done
+}
+# Exit (the pod restarts and retries) when no Sentinel gave an answer but some
+# rejected the password: starting as a first-bootstrap primary then would run
+# a second primary next to the real one, with whatever is on disk.
+refuse_on_auth_rejection() {
+  if [ -z "$BEST_HOST" ] && [ "$AUTH_REJECTED" -gt 0 ]; then
+    echo "$AUTH_REJECTED Sentinel(s) rejected the password and none reported a primary: not starting as a first-bootstrap primary, retrying" >&2
+    exit 1
+  fi
 }
 is_self() {
   [ "$1" = "$SELF" ] || hostname -i 2>/dev/null | tr ' ' '\n' | grep -qxF "$1"
@@ -1004,6 +1021,7 @@ if grep -q '^replicaof ' "$CONF"; then
   rm -f %[1]s/dump.rdb
 else
   query_sentinels
+  refuse_on_auth_rejection
   if [ -n "$BEST_HOST" ] && is_self "$BEST_HOST"; then
     echo "persistence is off and the Sentinels report this pod as the primary: waiting for them to fail over to a replica that holds the data"
     DEADLINE=$(($(date +%%s) + %[2]d))

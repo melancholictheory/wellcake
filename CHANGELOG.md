@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims to
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- In the Sentinel topology, a data pod no longer starts as a second primary when
+  the Sentinels answer but reject its password (#99). Its init took "no answer"
+  for a first bootstrap, so pod-0 started as the primary with whatever was on
+  its volume, next to the real one. It now fails and retries until a Sentinel
+  accepts the password; the primary guard does the same. The proactive rollout
+  also waits when more than one data pod reports `role:master` instead of
+  picking one and rolling the other as a stale replica.
+
 ## [0.14.0]
 
 ### Added
