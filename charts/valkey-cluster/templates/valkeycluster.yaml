@@ -189,3 +189,19 @@ spec:
       kmsKeyId: {{ .Values.backup.s3.kmsKeyId | quote }}
       {{- end }}
   {{- end }}
+  {{- if .Values.restoreFrom.enabled }}
+  restoreFrom:
+    sourceKey: {{ required "restoreFrom.sourceKey required" .Values.restoreFrom.sourceKey | quote }}
+    {{- if .Values.restoreFrom.awsCLIImage }}
+    awsCLIImage: {{ .Values.restoreFrom.awsCLIImage | quote }}
+    {{- end }}
+    s3:
+      bucket: {{ required "restoreFrom.s3.bucket required" .Values.restoreFrom.s3.bucket | quote }}
+      {{- if .Values.restoreFrom.s3.endpoint }}
+      endpoint: {{ .Values.restoreFrom.s3.endpoint | quote }}
+      {{- end }}
+      {{- if .Values.restoreFrom.s3.region }}
+      region: {{ .Values.restoreFrom.s3.region | quote }}
+      {{- end }}
+      credentialsSecret: {{ required "restoreFrom.s3.credentialsSecret required" .Values.restoreFrom.s3.credentialsSecret | quote }}
+  {{- end }}

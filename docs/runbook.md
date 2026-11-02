@@ -641,7 +641,8 @@ re-elects / reconnects.
 
 Restore is **opt-in at creation time** via `spec.restoreFrom`. The operator
 adds an init container that downloads the specified RDB object onto the
-data PVC before Valkey starts.
+data PVC before Valkey starts. With the valkey-cluster chart, set it in the
+`restoreFrom` value.
 
 ```yaml
 apiVersion: cache.wellcake.io/v1alpha1
