@@ -100,11 +100,22 @@ same opt-in; the rollout proceeds across two planes, one pod at a time, reusing
 `nextRolloutStep`:
 1. **Data:** roll the stale replicas first; when only the master remains stale
    (and all replicas are already fresh) — hand over via
-   `SENTINEL FAILOVER mymaster` (NOT an operator-driven `REPLICAOF`: in a
+   `SENTINEL FAILOVER mymaster` (NOT an operator-driven promotion: in a
    Sentinel topology the failover is owned by the Sentinel quorum, and a direct
-   promote would race with their election). The old master is demoted to a
-   replica by the Sentinels and is rolled as an ordinary stale replica on the
-   next pass.
+   promote would race with their election). The handover (`sentinelHandover`)
+   wraps it so that no acknowledged write is lost: `CLIENT PAUSE <15s> WRITE`
+   on the master, wait until every replica is online at the master's offset
+   (5s at most, otherwise lift the pause and retry on the next pass),
+   `SENTINEL FAILOVER` (an `INPROG` reply is followed too: the pause also holds
+   the Sentinels' `PUBLISH` on the master, so with a short
+   `down-after-milliseconds` they may start the failover themselves), wait
+   until a replica reports `role:master` (8s at most), `REPLICAOF` that replica on the old master, then `CLIENT UNPAUSE`.
+   The held writes then fail with `READONLY` and the clients move to the new
+   master. Without it the master kept taking writes until the Sentinels
+   demoted it (10 to 14s after the promotion), and the promoted replica could
+   lack the last ones: a live rollout with a client writing every 100ms lost 7
+   writes. The old master is rolled as an ordinary stale replica on the next
+   pass.
 2. **Sentinel monitors:** stateless — rolled one at a time (primary="" in
    `nextRolloutStep`), with `down-after`/wait-for-Ready holding quorum
    (replicas ≥ 3).

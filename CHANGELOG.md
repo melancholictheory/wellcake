@@ -19,6 +19,29 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   unset changes nothing, so upgrading the operator does not restart existing
   clusters. The `valkey-cluster` chart exposes it as `podLabels`.
 
+## [0.13.1]
+
+### Fixed
+
+- The proactive rollout of the Sentinel topology no longer loses writes when it
+  hands the master over. It ran `SENTINEL FAILOVER` while the master kept
+  taking writes: the Sentinels promoted a replica that could lack the last
+  ones, and the old master took more until they demoted it, 10 to 14s later.
+  The operator now pauses the master's writes (`CLIENT PAUSE ... WRITE`, 15s at
+  most), waits for every replica to reach its offset, runs `SENTINEL FAILOVER`,
+  points the old master at the replica the Sentinels promoted, and lifts the
+  pause. The held writes fail with `READONLY` and the clients move to the new
+  master; a client sees a few seconds of latency instead of lost writes. If
+  the replicas do not catch up within 5s, the pause is lifted and the handover
+  retried on the next pass.
+- In the Sentinel topology, the Sentinel StatefulSet now follows the
+  `valkey.wellcake.io/proactive-rollout` annotation when it is set or removed
+  on an existing cluster. Its update strategy was only applied when the
+  StatefulSet was created, so a cluster opted in afterwards kept the Sentinels
+  on `RollingUpdate`: a change of their pod template was rolled by both the
+  StatefulSet controller and the operator. The data StatefulSet already
+  followed the annotation.
+
 ## [0.13.0]
 
 ### Added
@@ -605,6 +628,7 @@ First public release of the operator. Highlights of the initial feature set:
 - CEL XValidation for immutable and conditional fields; config-hash-driven
   rolling restarts; version-gated Valkey 9.x resilience directives.
 
+[0.13.1]: https://github.com/melancholictheory/wellcake/releases/tag/v0.13.1
 [0.13.0]: https://github.com/melancholictheory/wellcake/releases/tag/v0.13.0
 [0.12.3]: https://github.com/melancholictheory/wellcake/releases/tag/v0.12.3
 [0.12.2]: https://github.com/melancholictheory/wellcake/releases/tag/v0.12.2

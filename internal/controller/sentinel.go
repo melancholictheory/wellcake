@@ -387,6 +387,9 @@ func (r *ValkeyClusterReconciler) ensureSentinelStatefulSet(ctx context.Context,
 	}
 	existing.Spec.Replicas = sts.Spec.Replicas
 	existing.Spec.Template = sts.Spec.Template
+	// OnDelete or RollingUpdate follows the proactive-rollout annotation, which
+	// can be set or removed on an existing cluster.
+	existing.Spec.UpdateStrategy = sts.Spec.UpdateStrategy
 	existing.Labels = sts.Labels
 	if err := r.Update(ctx, &existing); err != nil {
 		return nil, err

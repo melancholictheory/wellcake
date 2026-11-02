@@ -60,6 +60,7 @@ ROADMAP T7.
 - `TestNextRolloutStep` — the pure Replication state machine: replicas roll first (in ascending ordinal order), the primary only via promotion and only when it is the sole stale node; a not-ready pod parks the rollout.
 - `TestNextClusterRolloutStep`, `TestNextClusterRolloutStepNoReplicaShard` — Cluster: a shard's replicas first → `CLUSTER FAILOVER` on a freshly rolled replica → a shard without replicas rolls the master directly.
 - `TestAnyStale`, `TestSentinelDataMaster`, `TestSentinelNames`, `TestSentinelDataRolloutSequence`, `TestSentinelPlaneRolloutNoPrimary` — Sentinel: the data plane (replicas → `SENTINEL FAILOVER` of the master), the Sentinel plane (`primary=""` → roll-replica only), STS/FQDN names.
+- `TestReplicasCaughtUp`, `TestHandOverMaster`, `TestHandOverMasterReplicaBehind`, `TestHandOverMasterNoPromotion`, `TestHandOverMasterFailoverInProgress` — Sentinel master handover: writes paused before `SENTINEL FAILOVER`, which waits for the replicas to reach the master's offset; the old master pointed at the promoted replica before the pause is lifted; the pause lifted on every failure; a failover already in progress (`INPROG`) followed like ours.
 - `TestProactiveRolloutEnabled`, `TestUpdateStrategyFor`, `TestOrdinalFromPodName` — the opt-in annotation, OnDelete vs RollingUpdate, parsing the ordinal from a pod name.
 
 ### `cluster_pershard_test.go` — per-shard workload (ADR 0005)

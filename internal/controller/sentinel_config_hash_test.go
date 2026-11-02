@@ -67,3 +67,44 @@ func TestSentinelConfigChangeRollsSentinelPods(t *testing.T) {
 		t.Error("a timing change restarted the Sentinels; the operator applies timings live")
 	}
 }
+
+// The proactive-rollout annotation can be set or removed on an existing
+// cluster: the Sentinel StatefulSet must follow it on update, not only on
+// create, as the data StatefulSet does.
+func TestSentinelUpdateStrategyFollowsProactiveRollout(t *testing.T) {
+	vc := &cachev1beta1.ValkeyCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "s", Namespace: "ns"},
+		Spec: cachev1beta1.ValkeyClusterSpec{
+			Topology: cachev1beta1.TopologySentinel, Replicas: 3,
+			Sentinel: &cachev1beta1.SentinelSpec{Replicas: 3, Quorum: 2},
+		},
+	}
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = cachev1beta1.AddToScheme(scheme)
+	r := &ValkeyClusterReconciler{Client: fake.NewClientBuilder().WithScheme(scheme).Build(), Scheme: scheme}
+	ctx := context.Background()
+	strategy := func() appsv1.StatefulSetUpdateStrategyType {
+		t.Helper()
+		if _, err := r.ensureSentinelStatefulSet(ctx, vc, ""); err != nil {
+			t.Fatal(err)
+		}
+		var sts appsv1.StatefulSet
+		if err := r.Get(ctx, types.NamespacedName{Namespace: "ns", Name: "s-sentinel"}, &sts); err != nil {
+			t.Fatal(err)
+		}
+		return sts.Spec.UpdateStrategy.Type
+	}
+
+	if got := strategy(); got != appsv1.RollingUpdateStatefulSetStrategyType {
+		t.Fatalf("created without the annotation: strategy = %v, want RollingUpdate", got)
+	}
+	vc.Annotations = map[string]string{proactiveRolloutAnnotation: "true"}
+	if got := strategy(); got != appsv1.OnDeleteStatefulSetStrategyType {
+		t.Errorf("annotation set on an existing cluster: strategy = %v, want OnDelete", got)
+	}
+	vc.Annotations = nil
+	if got := strategy(); got != appsv1.RollingUpdateStatefulSetStrategyType {
+		t.Errorf("annotation removed: strategy = %v, want RollingUpdate", got)
+	}
+}

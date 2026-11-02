@@ -164,6 +164,17 @@ func (c *replClient) replicaOf(ctx context.Context, host string, port int32) err
 	return c.rdb.Do(ctx, "REPLICAOF", host, strconv.Itoa(int(port))).Err()
 }
 
+// clientPauseWrite holds the clients' write commands (CLIENT PAUSE ... WRITE)
+// for at most timeout. Reads go on, and the server lifts the pause by itself
+// when timeout ends.
+func (c *replClient) clientPauseWrite(ctx context.Context, timeout time.Duration) error {
+	return c.rdb.Do(ctx, "CLIENT", "PAUSE", strconv.FormatInt(timeout.Milliseconds(), 10), "WRITE").Err()
+}
+
+func (c *replClient) clientUnpause(ctx context.Context) error {
+	return c.rdb.Do(ctx, "CLIENT", "UNPAUSE").Err()
+}
+
 // clusterNodes returns the raw text output of CLUSTER NODES, suitable for the
 // parser in cluster.go. We use a raw string command (not the typed redis API)
 // because go-redis doesn't yet model the Valkey-specific output cleanly.
