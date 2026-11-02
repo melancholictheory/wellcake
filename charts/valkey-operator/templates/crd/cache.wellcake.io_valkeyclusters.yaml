@@ -3049,6 +3049,12 @@ spec:
             - message: perShardWorkload is immutable
               rule: has(self.perShardWorkload) == has(oldSelf.perShardWorkload) &&
                 (!has(self.perShardWorkload) || self.perShardWorkload == oldSelf.perShardWorkload)
+            - message: 'auth cannot be turned on for a running cluster with replicas:
+                replicas would restart with a password their primary does not have
+                and never sync. Create a new cluster with auth enabled'
+              rule: '!has(oldSelf.topology) || oldSelf.topology == ''Standalone''
+                || (has(oldSelf.auth) && (!has(oldSelf.auth.enabled) || oldSelf.auth.enabled))
+                || !(has(self.auth) && (!has(self.auth.enabled) || self.auth.enabled))'
           status:
             description: ValkeyClusterStatus defines the observed state of ValkeyCluster.
             properties:
@@ -6361,6 +6367,12 @@ spec:
                 Durable profile
               rule: '!has(self.storage) || !has(self.storage.medium) || self.storage.medium
                 != ''Memory'' || self.profile != ''Durable'''
+            - message: 'auth cannot be turned on for a running cluster with replicas:
+                replicas would restart with a password their primary does not have
+                and never sync. Create a new cluster with auth enabled'
+              rule: '!has(oldSelf.topology) || oldSelf.topology == ''Standalone''
+                || (has(oldSelf.auth) && (!has(oldSelf.auth.enabled) || oldSelf.auth.enabled))
+                || !(has(self.auth) && (!has(self.auth.enabled) || self.auth.enabled))'
             - message: perShardWorkload is only valid when topology is Cluster
               rule: '!has(self.perShardWorkload) || self.topology == ''Cluster'''
             - message: shards can only grow unless perShardWorkload=true (per-StatefulSet

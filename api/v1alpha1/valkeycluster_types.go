@@ -53,6 +53,7 @@ const (
 // +kubebuilder:validation:XValidation:rule="!has(self.perShardWorkload) || self.topology == 'Cluster'",message="perShardWorkload is only valid when topology is Cluster"
 // +kubebuilder:validation:XValidation:rule="!has(self.shards) || !has(oldSelf.shards) || self.shards >= oldSelf.shards || (has(self.perShardWorkload) && self.perShardWorkload)",message="shards can only grow unless perShardWorkload=true (per-StatefulSet layout supports clean shard scale-down; single-STS removes replicas, not a shard — see ADR 0005 / C4)"
 // +kubebuilder:validation:XValidation:rule="has(self.perShardWorkload) == has(oldSelf.perShardWorkload) && (!has(self.perShardWorkload) || self.perShardWorkload == oldSelf.perShardWorkload)",message="perShardWorkload is immutable"
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.topology) || oldSelf.topology == 'Standalone' || (has(oldSelf.auth) && (!has(oldSelf.auth.enabled) || oldSelf.auth.enabled)) || !(has(self.auth) && (!has(self.auth.enabled) || self.auth.enabled))",message="auth cannot be turned on for a running cluster with replicas: replicas would restart with a password their primary does not have and never sync. Create a new cluster with auth enabled"
 type ValkeyClusterSpec struct {
 	// Topology selects the deployment shape. Immutable after creation —
 	// switching shape requires a new resource because PVCs, layout and
