@@ -187,3 +187,18 @@ backup:
     credentialsSecret: ""
     encryption: ""        # "" (off) | AES256 | KMS
     kmsKeyId: ""          # optional, with encryption=KMS; empty uses the S3 default KMS key
+
+# Restore from an S3 backup, at creation: an init container downloads the RDB
+# onto each data pod's volume before Valkey starts, unless the volume already
+# holds a dump.rdb. For the Cluster topology, sourceKey needs a {shard}
+# placeholder (see the runbook). The Secret holds AWS_ACCESS_KEY_ID and
+# AWS_SECRET_ACCESS_KEY, and may be the backup one.
+restoreFrom:
+  enabled: false
+  sourceKey: ""         # exact object key, e.g. backups/web-cache-20260528-030000.rdb
+  awsCLIImage: ""
+  s3:
+    bucket: ""
+    endpoint: ""
+    region: us-east-1
+    credentialsSecret: ""

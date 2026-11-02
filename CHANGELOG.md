@@ -69,6 +69,9 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   cannot collide with a label the selectors and Services rely on. Leaving it
   unset changes nothing, so upgrading the operator does not restart existing
   clusters. The `valkey-cluster` chart exposes it as `podLabels`.
+- The valkey-cluster chart sets `spec.restoreFrom` (`restoreFrom`), so a
+  cluster deployed with the chart can be created from an S3 backup. It is off
+  by default and renders nothing until `restoreFrom.enabled` is set.
 
 ### Changed
 
