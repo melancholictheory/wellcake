@@ -130,11 +130,11 @@ If `auth.existingSecret` is not set, the operator generated its own:
 kubectl -n <ns> get secret <cluster>-auth -o jsonpath='{.data.password}' | base64 -d
 ```
 
-### Password rotation without a restart (operator-managed Secret)
+### Password rotation (operator-managed Secret)
 
 For clusters with auth and an **operator-managed** Secret
-(`auth.existingSecret` NOT set), password rotation is performed in place,
-without restarting pods, via an annotation carrying a unique token:
+(`auth.existingSecret` NOT set), password rotation is applied in place
+first, via an annotation carrying a unique token:
 
 ```sh
 kubectl -n <ns> annotate valkeycluster <cluster> \
@@ -143,7 +143,10 @@ kubectl -n <ns> annotate valkeycluster <cluster> \
 
 The operator generates a new password, rolls it out to the live instances
 (a live `ACL SETUSER` on the `default` user + `masterauth`, with no
-replication blip) and rewrites `<cluster>-auth`. The action is idempotent
+replication blip; in the Sentinel topology the Sentinels take it live too)
+and rewrites `<cluster>-auth`. The data pods then roll once, one at a time,
+so the metrics exporter and the init scripts pick up the new Secret; the
+Sentinels do not restart. The action is idempotent
 by token — a repeat reconcile with the same annotation value does nothing.
 Verify that the operator processed the rotation:
 
@@ -500,10 +503,9 @@ kubectl -n <ns> annotate valkeycluster <cluster> valkey.wellcake.io/proactive-ro
 With the valkey-cluster chart, it can be set in the `annotations` value
 instead, next to the rest of the cluster's configuration.
 
-The password is excluded from the hash — password rotation does NOT roll
-the pods and **requires no manual restart**: the operator rotates the
-password in place via the annotation (see "Password rotation without a
-restart" above).
+Password rotation needs no manual restart: the operator applies the new
+password live, then the data pods roll once on their own (see "Password
+rotation" above).
 
 ## Expanding storage
 

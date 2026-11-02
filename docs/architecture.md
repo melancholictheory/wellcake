@@ -199,16 +199,21 @@ annotation. Any change to `valkey.conf` (eviction policy, maxmemory, TLS,
 free-form `spec.config`) changes the hash, and the StatefulSet rolls the pods
 per its UpdateStrategy.
 
-The password is deliberately excluded from the hash so that rotation does not
-trigger a restart on every silent rotation. Password rotation is **implemented**
-(AR5): it is triggered by the `valkey.wellcake.io/rotate-password=<token>`
-annotation exactly once per token (gated on
-`Status.LastPasswordRotationToken`), without a restart — via `ACL SETUSER
-default` in two passes (additive password → cutover + `ACL SAVE`). With
-`aclfile`, a live `CONFIG SET requirepass` does not change auth, so rotation goes
-through ACL. This applies only to operator-managed Secrets; `existingSecret` is
-out of scope. TLS certificate reload on a cert-manager renew is automatic,
-without a restart (`CONFIG SET tls-cert-file` + TLS-handshake verification).
+The data pods' hash includes the password (it is in `valkey.conf`), the
+Sentinels' hash does not. Password rotation is **implemented** (AR5): it is
+triggered by the `valkey.wellcake.io/rotate-password=<token>` annotation
+exactly once per token (gated on `Status.LastPasswordRotationToken`) and is
+applied live first, via `ACL SETUSER default` in two passes (additive password
+→ cutover + `ACL SAVE`). With `aclfile`, a live `CONFIG SET requirepass` does
+not change auth, so rotation goes through ACL. In the Sentinel topology the
+Sentinels get the new password live too, between the two passes (`ACL
+SETUSER`, `SENTINEL SET auth-pass`, `SENTINEL CONFIG SET sentinel-pass`), so
+the Sentinels and the data pods never reject each other. The data pods then
+roll once, so the exporter and the init scripts pick up the new Secret; the
+Sentinels do not restart. This applies only to operator-managed Secrets;
+`existingSecret` is out of scope. TLS certificate reload on a cert-manager
+renew is automatic, without a restart (`CONFIG SET tls-cert-file` +
+TLS-handshake verification).
 
 ## Rendering runtime config via an initContainer
 

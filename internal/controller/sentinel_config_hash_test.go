@@ -66,6 +66,18 @@ func TestSentinelConfigChangeRollsSentinelPods(t *testing.T) {
 	if podHash("secret") != withAuth {
 		t.Error("a timing change restarted the Sentinels; the operator applies timings live")
 	}
+
+	// The in-place rotation sets the password on the running Sentinels, so a new
+	// operator-managed password does not restart them (#97)...
+	if podHash("rotated") != withAuth {
+		t.Error("a rotated operator-managed password restarted the Sentinels")
+	}
+	// ...but a user-managed Secret is never rotated live and still rolls them.
+	vc.Spec.Auth.ExistingSecret = "my-secret"
+	userHash := podHash("secret")
+	if podHash("changed-by-user") == userHash {
+		t.Error("a changed existingSecret password did not restart the Sentinels")
+	}
 }
 
 // The proactive-rollout annotation can be set or removed on an existing
