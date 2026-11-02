@@ -44,10 +44,12 @@ const (
 // ValkeyClusterSpec defines the desired state of ValkeyCluster.
 // +kubebuilder:validation:XValidation:rule="self.topology != 'Cluster' || has(self.shards)",message="shards is required when topology is Cluster"
 // +kubebuilder:validation:XValidation:rule="self.topology == 'Cluster' || !has(self.shards)",message="shards is only valid when topology is Cluster"
+// +kubebuilder:validation:XValidation:rule="self.topology == 'Cluster' || !has(self.replicasPerShard)",message="replicasPerShard is only valid when topology is Cluster"
 // +kubebuilder:validation:XValidation:rule="self.topology != 'Sentinel' || has(self.sentinel)",message="sentinel is required when topology is Sentinel"
 // +kubebuilder:validation:XValidation:rule="self.topology == 'Sentinel' || !has(self.sentinel)",message="sentinel is only valid when topology is Sentinel"
 // +kubebuilder:validation:XValidation:rule="!has(self.replicateFrom) || self.topology == 'Standalone' || self.topology == 'Replication'",message="replicateFrom only supported for Standalone or Replication topology"
 // +kubebuilder:validation:XValidation:rule="!has(self.replicateFrom) || !has(self.replicateFrom.caSecret) || (self.replicateFrom.tls && has(self.tls) && self.tls.enabled)",message="replicateFrom.caSecret requires replicateFrom.tls=true and spec.tls.enabled=true"
+// +kubebuilder:validation:XValidation:rule="!has(self.storage) || !has(self.storage.medium) || self.storage.medium != 'Memory' || self.profile != 'Durable'",message="storage.medium=Memory is ephemeral and not allowed with the Durable profile"
 // +kubebuilder:validation:XValidation:rule="!has(self.perShardWorkload) || self.topology == 'Cluster'",message="perShardWorkload is only valid when topology is Cluster"
 // +kubebuilder:validation:XValidation:rule="!has(self.shards) || !has(oldSelf.shards) || self.shards >= oldSelf.shards || (has(self.perShardWorkload) && self.perShardWorkload)",message="shards can only grow unless perShardWorkload=true (per-StatefulSet layout supports clean shard scale-down; single-STS removes replicas, not a shard — see ADR 0005 / C4)"
 // +kubebuilder:validation:XValidation:rule="has(self.perShardWorkload) == has(oldSelf.perShardWorkload) && (!has(self.perShardWorkload) || self.perShardWorkload == oldSelf.perShardWorkload)",message="perShardWorkload is immutable"
@@ -491,8 +493,22 @@ type StorageSpec struct {
 	// Persistence mode: rdb, aof, both, none.
 	// +kubebuilder:validation:Enum=rdb;aof;both;none
 	// +kubebuilder:default=rdb
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="storage mode is immutable"
 	// +optional
 	Mode string `json:"mode,omitempty"`
+
+	// Medium selects what backs the data dir. "Disk" (default) provisions a PVC.
+	// "Memory" backs it with a tmpfs emptyDir (RAM): no PVC, no StorageClass, no
+	// PV-bind latency, and — crucially — it counts against the pod's memory limit
+	// rather than ephemeral-storage, so it does NOT trip the nodefs eviction that
+	// made plain (disk-backed) emptyDir unsafe under ephemeral-storage pressure. Intended for the Cache
+	// profile (ephemeral data); data does NOT survive a pod restart, so it is
+	// rejected for the Durable profile. Immutable.
+	// +kubebuilder:validation:Enum=Disk;Memory
+	// +kubebuilder:default=Disk
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="storage medium is immutable"
+	// +optional
+	Medium string `json:"medium,omitempty"`
 }
 
 // AuthSpec configures password authentication via Secret.
@@ -628,6 +644,25 @@ type ValkeyClusterStatus struct {
 	// +optional
 	Primary string `json:"primary,omitempty"`
 
+	// PrimaryDownSince is when the operator first observed the primary
+	// unreachable. It debounces operator-driven failover: a replica is promoted
+	// only after the primary has been down for at least the failover threshold,
+	// so a primary that is merely briefly busy (slow BGSAVE, GC pause) is not
+	// prematurely failed over. Cleared once a master is reachable again.
+	// +optional
+	PrimaryDownSince *metav1.Time `json:"primaryDownSince,omitempty"`
+
+	// QuorumDownSince is when the operator first observed the Cluster topology
+	// stuck in cluster_state:fail with a majority of primaries unreachable —
+	// the state gossip cannot self-heal, because authorizing a replica failover
+	// needs a master quorum that no longer exists. It debounces operator-driven
+	// quorum recovery (CLUSTER FAILOVER TAKEOVER): the operator only intervenes
+	// after the cluster has been stuck for the recovery threshold, giving gossip
+	// time to promote replicas on its own where a quorum still exists. Cleared
+	// once the cluster reports cluster_state:ok again.
+	// +optional
+	QuorumDownSince *metav1.Time `json:"quorumDownSince,omitempty"`
+
 	// InternalEndpoint is the in-cluster client endpoint (host:port) of the
 	// client Service, for consumers to connect to. Surfaced here so wrappers
 	// (e.g. a Crossplane Composition) can project it without recomputing names.
@@ -678,6 +713,20 @@ type ValkeyClusterStatus struct {
 	// failover exactly once per request.
 	// +optional
 	LastFailoverToken string `json:"lastFailoverToken,omitempty"`
+
+	// LastPasswordRotationToken is the value of the valkey.wellcake.io/rotate-password
+	// annotation the operator last acted on. Used to run an in-place password
+	// rotation (live CONFIG SET requirepass/masterauth, no restart) exactly once
+	// per request.
+	// +optional
+	LastPasswordRotationToken string `json:"lastPasswordRotationToken,omitempty"`
+
+	// LastTLSCertFingerprint is the SHA-256 fingerprint of the TLS leaf cert the
+	// operator last reloaded onto the live pods. When cert-manager renews the
+	// cert Secret this no longer matches, triggering an in-place TLS reload
+	// (live CONFIG SET tls-cert-file/tls-key-file/tls-ca-cert-file, no restart).
+	// +optional
+	LastTLSCertFingerprint string `json:"lastTLSCertFingerprint,omitempty"`
 
 	// Conditions represent the current state of the resource.
 	// Well-known types: Available, Progressing, Degraded, ClusterInitialized.
