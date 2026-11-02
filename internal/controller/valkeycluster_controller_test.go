@@ -198,6 +198,60 @@ var _ = Describe("ValkeyCluster CRD schema (envtest)", func() {
 		})
 	})
 
+	// Turning auth on restarts each replica with a password its primary does not
+	// have, so it never syncs and a rollout promotes an empty replica (#97).
+	Context("CEL rule on enabling auth", func() {
+		const msg = "auth cannot be turned on for a running cluster with replicas"
+		mk := func(name string, topo cachev1beta1.Topology, auth *cachev1beta1.AuthSpec) *cachev1beta1.ValkeyCluster {
+			vc := &cachev1beta1.ValkeyCluster{
+				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
+				Spec:       cachev1beta1.ValkeyClusterSpec{Topology: topo, Auth: auth},
+			}
+			Expect(k8sClient.Create(ctx, vc)).To(Succeed())
+			DeferCleanup(func() { _ = k8sClient.Delete(ctx, vc) })
+			return vc
+		}
+		update := func(vc *cachev1beta1.ValkeyCluster, auth *cachev1beta1.AuthSpec) error {
+			var got cachev1beta1.ValkeyCluster
+			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(vc), &got)).To(Succeed())
+			got.Spec.Auth = auth
+			return k8sClient.Update(ctx, &got)
+		}
+
+		It("rejects enabled: false -> true with replicas", func() {
+			vc := mk("cel-auth-flip", cachev1beta1.TopologyReplication, &cachev1beta1.AuthSpec{Enabled: new(false)})
+			err := update(vc, &cachev1beta1.AuthSpec{Enabled: new(true)})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring(msg))
+		})
+
+		It("rejects adding an auth block (enabled by default) with replicas", func() {
+			vc := mk("cel-auth-add", cachev1beta1.TopologyReplication, nil)
+			err := update(vc, &cachev1beta1.AuthSpec{})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring(msg))
+		})
+
+		It("rejects it through v1alpha1 too", func() {
+			vc := mk("cel-auth-alpha", cachev1beta1.TopologyReplication, &cachev1beta1.AuthSpec{Enabled: new(false)})
+			u := &unstructured.Unstructured{}
+			u.SetAPIVersion(cachev1beta1.GroupVersion.Group + "/v1alpha1")
+			u.SetKind("ValkeyCluster")
+			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(vc), u)).To(Succeed())
+			Expect(unstructured.SetNestedField(u.Object, true, "spec", "auth", "enabled")).To(Succeed())
+			err := k8sClient.Update(ctx, u)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring(msg))
+		})
+
+		It("allows it on Standalone, and allows turning auth off", func() {
+			sa := mk("cel-auth-standalone", cachev1beta1.TopologyStandalone, &cachev1beta1.AuthSpec{Enabled: new(false)})
+			Expect(update(sa, &cachev1beta1.AuthSpec{Enabled: new(true)})).To(Succeed())
+			on := mk("cel-auth-off", cachev1beta1.TopologyReplication, &cachev1beta1.AuthSpec{Enabled: new(true)})
+			Expect(update(on, &cachev1beta1.AuthSpec{Enabled: new(false)})).To(Succeed())
+		})
+	})
+
 	Context("CEL immutability rules", func() {
 		It("rejects changing topology after creation", func() {
 			vc := &cachev1beta1.ValkeyCluster{

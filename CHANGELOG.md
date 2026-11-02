@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims to
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Turning `auth` on for a running cluster with replicas is now rejected (#97).
+  Each replica restarted with a password its primary did not have yet, never
+  synced, and still turned Ready, so a rollout could promote an empty replica
+  and lose all the data. Create a new cluster with auth enabled instead.
+  Standalone clusters, which have no replicas, can still turn auth on.
+
 ## [0.14.0]
 
 ### Added
