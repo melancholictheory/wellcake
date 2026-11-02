@@ -55,6 +55,17 @@ func TestSentinelDataMaster(t *testing.T) {
 		t.Errorf("sentinelDataMaster (unreachable master) = %q, want empty", got)
 	}
 
+	// Two data pods report role:master (a pod that started as a primary next to
+	// the real one, #99): pick neither, so the rollout waits.
+	twoMasters := []podRole{
+		{ordinal: 0, role: roleMaster, reachable: true},
+		{ordinal: 1, role: roleSlave, reachable: true},
+		{ordinal: 2, role: roleMaster, reachable: true},
+	}
+	if got := sentinelDataMaster(vc, twoMasters); got != "" {
+		t.Errorf("sentinelDataMaster (two masters) = %q, want empty", got)
+	}
+
 	// No master visible at all.
 	if got := sentinelDataMaster(vc, []podRole{{ordinal: 0, role: roleSlave, reachable: true}}); got != "" {
 		t.Errorf("sentinelDataMaster (no master) = %q, want empty", got)
