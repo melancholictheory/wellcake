@@ -78,6 +78,10 @@ func (r *ValkeyClusterReconciler) driveSentinelRollout(
 		survey := r.surveyReplication(ctx, vc, password)
 		master := sentinelDataMaster(vc, survey)
 		if master == "" {
+			if countReachableMasters(survey) > 1 {
+				log.Info("proactive sentinel rollout: more than one data pod reports role:master, waiting",
+					"name", vc.Name)
+			}
 			return true, nil
 		}
 		action := nextRolloutStep(dataPods, dataRev, master)
@@ -156,13 +160,30 @@ func anyStale(pods []rolloutPod, desiredRevision string) bool {
 // sentinelDataMaster returns the pod name of the reachable data node that INFO
 // reports as the master, or "" if none is currently visible.
 func sentinelDataMaster(vc *cachev1beta1.ValkeyCluster, survey []podRole) string {
+	master := ""
 	for i := range survey {
 		s := survey[i]
 		if s.reachable && s.role == roleMaster {
-			return podName(vc, s.ordinal)
+			if master != "" {
+				// Two data pods claim to be the primary: picking one would roll the
+				// other (maybe the one with the data) as a stale replica. Wait until
+				// the Sentinels have demoted one of them.
+				return ""
+			}
+			master = podName(vc, s.ordinal)
 		}
 	}
-	return ""
+	return master
+}
+
+func countReachableMasters(survey []podRole) int {
+	n := 0
+	for _, s := range survey {
+		if s.reachable && s.role == roleMaster {
+			n++
+		}
+	}
+	return n
 }
 
 // sentinelStatefulSetName is the name shared by the Sentinel StatefulSet and its
@@ -288,6 +309,11 @@ func handOverMaster(ctx context.Context, dial func(host string) *replClient, fai
 		return fmt.Errorf("dial master %s failed", masterHost)
 	}
 	defer mc.close()
+	// Do not pause the writes for replicas that are not even linked: they cannot
+	// catch up, so the pause would only cost writes on every retry.
+	if info, err := mc.info(ctx); err != nil || !replicasLinked(info, len(replicaHosts)) {
+		return fmt.Errorf("not every replica is linked to the master %s", masterHost)
+	}
 	if err := mc.clientPauseWrite(ctx, t.pause); err != nil {
 		return fmt.Errorf("CLIENT PAUSE: %w", err)
 	}
@@ -342,6 +368,21 @@ func handOverMaster(ctx context.Context, dial func(host string) *replClient, fai
 		return fmt.Errorf("REPLICAOF %s on the old master: %w", promoted, err)
 	}
 	return nil
+}
+
+// replicasLinked reports whether a master's INFO replication lists at least
+// want replicas, all online (their offset may still lag).
+func replicasLinked(info map[string]string, want int) bool {
+	n, err := strconv.Atoi(info["connected_slaves"])
+	if err != nil || n < want {
+		return false
+	}
+	for i := range n {
+		if !strings.Contains(info["slave"+strconv.Itoa(i)], "state=online") {
+			return false
+		}
+	}
+	return true
 }
 
 // replicasCaughtUp reports whether a master's INFO replication lists at least

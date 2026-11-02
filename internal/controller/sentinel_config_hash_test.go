@@ -41,7 +41,7 @@ func TestSentinelConfigChangeRollsSentinelPods(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := r.ensureSentinelStatefulSet(ctx, vc, hash); err != nil {
+		if _, err := r.ensureSentinelStatefulSet(ctx, vc, hash, false); err != nil {
 			t.Fatal(err)
 		}
 		var sts appsv1.StatefulSet
@@ -98,7 +98,7 @@ func TestSentinelUpdateStrategyFollowsProactiveRollout(t *testing.T) {
 	ctx := context.Background()
 	strategy := func() appsv1.StatefulSetUpdateStrategyType {
 		t.Helper()
-		if _, err := r.ensureSentinelStatefulSet(ctx, vc, ""); err != nil {
+		if _, err := r.ensureSentinelStatefulSet(ctx, vc, "", false); err != nil {
 			t.Fatal(err)
 		}
 		var sts appsv1.StatefulSet
@@ -118,5 +118,66 @@ func TestSentinelUpdateStrategyFollowsProactiveRollout(t *testing.T) {
 	vc.Annotations = nil
 	if got := strategy(); got != appsv1.RollingUpdateStatefulSetStrategyType {
 		t.Errorf("annotation removed: strategy = %v, want RollingUpdate", got)
+	}
+}
+
+// With RollingUpdate, the Sentinels' new template waits while the data
+// StatefulSet still rolls, so both planes never restart at once (#97). The
+// replica count and the strategy still follow the spec.
+func TestSentinelTemplateHeldWhileDataRolls(t *testing.T) {
+	vc := &cachev1beta1.ValkeyCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "s", Namespace: "ns"},
+		Spec: cachev1beta1.ValkeyClusterSpec{
+			Topology: cachev1beta1.TopologySentinel, Replicas: 3,
+			Sentinel: &cachev1beta1.SentinelSpec{Replicas: 3, Quorum: 2},
+		},
+	}
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = cachev1beta1.AddToScheme(scheme)
+	r := &ValkeyClusterReconciler{Client: fake.NewClientBuilder().WithScheme(scheme).Build(), Scheme: scheme}
+	ctx := context.Background()
+	get := func() appsv1.StatefulSet {
+		var sts appsv1.StatefulSet
+		if err := r.Get(ctx, types.NamespacedName{Namespace: "ns", Name: "s-sentinel"}, &sts); err != nil {
+			t.Fatal(err)
+		}
+		return sts
+	}
+	if _, err := r.ensureSentinelStatefulSet(ctx, vc, "h1", false); err != nil {
+		t.Fatal(err)
+	}
+	vc.Spec.Sentinel.Replicas = 5
+	if _, err := r.ensureSentinelStatefulSet(ctx, vc, "h2", true); err != nil {
+		t.Fatal(err)
+	}
+	if sts := get(); sts.Spec.Template.Annotations[configHashAnnotation] != "h1" || *sts.Spec.Replicas != 5 {
+		t.Errorf("held: hash=%q replicas=%d, want h1 and 5", sts.Spec.Template.Annotations[configHashAnnotation], *sts.Spec.Replicas)
+	}
+	if _, err := r.ensureSentinelStatefulSet(ctx, vc, "h2", false); err != nil {
+		t.Fatal(err)
+	}
+	if sts := get(); sts.Spec.Template.Annotations[configHashAnnotation] != "h2" {
+		t.Errorf("released: hash=%q, want h2", sts.Spec.Template.Annotations[configHashAnnotation])
+	}
+
+	three := int32(3)
+	done := appsv1.StatefulSet{Spec: appsv1.StatefulSetSpec{Replicas: &three}, Status: appsv1.StatefulSetStatus{
+		ObservedGeneration: 2, UpdateRevision: "b", CurrentRevision: "b", UpdatedReplicas: 3, ReadyReplicas: 3}}
+	done.Generation = 2
+	if statefulSetRolling(&done) {
+		t.Error("a fully rolled StatefulSet reported as rolling")
+	}
+	for name, mut := range map[string]func(*appsv1.StatefulSet){
+		"new generation not observed": func(s *appsv1.StatefulSet) { s.Generation = 3 },
+		"revisions differ":            func(s *appsv1.StatefulSet) { s.Status.CurrentRevision = "a" },
+		"not all updated":             func(s *appsv1.StatefulSet) { s.Status.UpdatedReplicas = 2 },
+		"not all ready":               func(s *appsv1.StatefulSet) { s.Status.ReadyReplicas = 2 },
+	} {
+		s := done.DeepCopy()
+		mut(s)
+		if !statefulSetRolling(s) {
+			t.Errorf("%s: want rolling", name)
+		}
 	}
 }

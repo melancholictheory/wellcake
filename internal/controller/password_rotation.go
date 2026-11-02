@@ -7,11 +7,13 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	cachev1beta1 "github.com/melancholictheory/wellcake/api/v1beta1"
@@ -63,6 +65,14 @@ func (r *ValkeyClusterReconciler) reconcilePasswordRotation(ctx context.Context,
 		if token == fresh.Status.LastPasswordRotationToken {
 			return false, nil
 		}
+	}
+
+	// The rotation is applied live to every data pod. Until they all exist and
+	// are Ready (a cluster created with the annotation, a rollout, a scale-up),
+	// defer it instead of failing: an error here returns before the reconcile
+	// creates the StatefulSet, so a new cluster would never come up.
+	if ready, err := r.allDataPodsReady(ctx, vc); err != nil || !ready {
+		return false, err
 	}
 
 	oldPw, err := r.ensurePasswordSecret(ctx, vc)
@@ -219,4 +229,26 @@ func (r *ValkeyClusterReconciler) updatePasswordSecret(ctx context.Context, vc *
 	}
 	sec.Data[secretKeyPassword] = []byte(newPw)
 	return r.Update(ctx, &sec)
+}
+
+// allDataPodsReady reports whether every data pod of the cluster (Sentinel pods
+// aside, per-shard StatefulSets included) exists and is Ready.
+func (r *ValkeyClusterReconciler) allDataPodsReady(ctx context.Context, vc *cachev1beta1.ValkeyCluster) (bool, error) {
+	var list corev1.PodList
+	if err := r.List(ctx, &list, client.InNamespace(vc.Namespace), client.MatchingLabels{instanceLabel: vc.Name}); err != nil {
+		return false, err
+	}
+	ready := int32(0)
+	for i := range list.Items {
+		p := &list.Items[i]
+		// Sentinel pods share the data pods' labels (component=sentinel on both
+		// in the Sentinel topology), so tell them apart by their StatefulSet name.
+		if strings.HasPrefix(p.Name, sentinelStatefulSetName(vc)+"-") || p.DeletionTimestamp != nil {
+			continue
+		}
+		if podIsReady(p) {
+			ready++
+		}
+	}
+	return ready >= totalReplicas(vc), nil
 }
