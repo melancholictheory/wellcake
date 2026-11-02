@@ -47,7 +47,8 @@ imagePullPolicy: IfNotPresent
 imagePullSecrets: []
 # Extra labels on every pod of the cluster (Valkey, Sentinel, backup/restore and
 # cluster-operation Jobs), e.g. for a label-based network policy or firewall.
-# Changing them rolls the pods.
+# Keys under valkey.wellcake.io/, cache.wellcake.io/ and app.kubernetes.io/ are
+# rejected. Changing them rolls the pods.
 # Example:
 # podLabels:
 #   example.com/egress-s3: allow

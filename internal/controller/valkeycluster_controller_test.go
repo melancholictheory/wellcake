@@ -150,6 +150,54 @@ var _ = Describe("ValkeyCluster CRD schema (envtest)", func() {
 		})
 	})
 
+	// The operator manages labels under these prefixes, some only on the live
+	// pods (valkey.wellcake.io/role, which the primary Service selects on), so a
+	// podLabels key there is rejected whatever the pod template holds.
+	Context("CEL rule on podLabels", func() {
+		const msg = "podLabels must not use the operator's label prefixes"
+
+		for i, key := range []string{"valkey.wellcake.io/role", "cache.wellcake.io/shard", "app.kubernetes.io/name"} {
+			It("rejects the key "+key, func() {
+				vc := &cachev1beta1.ValkeyCluster{
+					ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("cel-podlabels-%d", i), Namespace: ns},
+					Spec:       cachev1beta1.ValkeyClusterSpec{PodLabels: map[string]string{key: "primary"}},
+				}
+				err := k8sClient.Create(ctx, vc)
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring(msg))
+			})
+		}
+
+		It("rejects the key in v1alpha1 too", func() {
+			u := &unstructured.Unstructured{Object: map[string]any{
+				"metadata": map[string]any{"name": "cel-podlabels-alpha", "namespace": ns},
+				"spec":     map[string]any{"podLabels": map[string]any{"valkey.wellcake.io/role": "primary"}},
+			}}
+			u.SetAPIVersion(cachev1beta1.GroupVersion.Group + "/v1alpha1")
+			u.SetKind("ValkeyCluster")
+			err := k8sClient.Create(ctx, u)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring(msg))
+		})
+
+		It("accepts other keys, and rejects the key when an update adds it", func() {
+			vc := &cachev1beta1.ValkeyCluster{
+				ObjectMeta: metav1.ObjectMeta{Name: "cel-podlabels-ok", Namespace: ns},
+				Spec: cachev1beta1.ValkeyClusterSpec{PodLabels: map[string]string{
+					"example.com/egress-s3": "allow",
+					"team":                  "cache",
+				}},
+			}
+			Expect(k8sClient.Create(ctx, vc)).To(Succeed())
+			DeferCleanup(func() { _ = k8sClient.Delete(ctx, vc) })
+
+			vc.Spec.PodLabels["valkey.wellcake.io/role"] = "primary"
+			err := k8sClient.Update(ctx, vc)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring(msg))
+		})
+	})
+
 	Context("CEL immutability rules", func() {
 		It("rejects changing topology after creation", func() {
 			vc := &cachev1beta1.ValkeyCluster{

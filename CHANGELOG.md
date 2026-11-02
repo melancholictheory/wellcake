@@ -13,10 +13,11 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (including per-shard ones), the backup CronJob, and the restore and cluster
   bootstrap/scale/reshard Jobs. It is meant for label-based network policies
   or firewalls, for example to let the backup and `restoreFrom` pods reach the
-  bucket. The operator's own labels win on a key conflict, so the selectors
-  and Services are unaffected. Leaving it unset changes nothing, so upgrading
-  the operator does not restart existing clusters. The `valkey-cluster` chart
-  exposes it as `podLabels`.
+  bucket. Keys under the operator's prefixes (`valkey.wellcake.io/`,
+  `cache.wellcake.io/`, `app.kubernetes.io/`) are rejected, so a user label
+  cannot collide with a label the selectors and Services rely on. Leaving it
+  unset changes nothing, so upgrading the operator does not restart existing
+  clusters. The `valkey-cluster` chart exposes it as `podLabels`.
 
 ## [0.13.0]
 

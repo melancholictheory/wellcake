@@ -141,8 +141,9 @@ func labelsFor(vc *cachev1beta1.ValkeyCluster) map[string]string {
 }
 
 // podLabelsFor returns the labels of a pod template: spec.podLabels, with the
-// operator's own labels on top, so a user label never replaces one that a
-// selector or a Service relies on. Left unset, the labels are unchanged.
+// operator's own labels on top. The CRD rejects podLabels keys under the
+// operator's prefixes, so the merge order is only a safety net. Left unset, the
+// labels are unchanged.
 func podLabelsFor(vc *cachev1beta1.ValkeyCluster, labels map[string]string) map[string]string {
 	if len(vc.Spec.PodLabels) == 0 {
 		return labels

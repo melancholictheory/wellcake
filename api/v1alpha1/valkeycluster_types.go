@@ -89,6 +89,7 @@ type ValkeyClusterSpec struct {
 	// PodLabels are extra labels on every operator-managed pod. Mirrors v1beta1
 	// so the field survives v1alpha1↔v1beta1 conversion.
 	// +optional
+	// +kubebuilder:validation:XValidation:rule="self.all(k, !k.startsWith('valkey.wellcake.io/') && !k.startsWith('cache.wellcake.io/') && !k.startsWith('app.kubernetes.io/'))",message="podLabels must not use the operator's label prefixes"
 	PodLabels map[string]string `json:"podLabels,omitempty"`
 
 	// Replicas is the number of Valkey instances.

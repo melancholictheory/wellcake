@@ -1905,10 +1905,10 @@ func TestImagePullSecretsPropagateToEveryPod(t *testing.T) {
 
 // spec.podLabels must reach every operator-managed pod: a label-based firewall
 // that lets the backup pods reach the bucket is useless if the backup CronJob
-// pods do not carry the label. The operator's own labels must win, or a user
-// label could move a pod out of its StatefulSet selector or Services.
+// pods do not carry the label. The selectors must not take them. The CRD
+// rejects keys under the operator's prefixes (envtest).
 func TestPodLabelsPropagateToEveryPod(t *testing.T) {
-	podLabels := map[string]string{"example.com/egress-s3": "allow", nameLabel: "other"}
+	podLabels := map[string]string{"example.com/egress-s3": "allow"}
 	withLabels := func(vc *cachev1beta1.ValkeyCluster) *cachev1beta1.ValkeyCluster {
 		vc.Spec.PodLabels = podLabels
 		return vc
@@ -1954,9 +1954,6 @@ func TestPodLabelsPropagateToEveryPod(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			if got["example.com/egress-s3"] != "allow" {
 				t.Errorf("%s pod labels = %v, want example.com/egress-s3=allow", name, got)
-			}
-			if got[nameLabel] != appValkey {
-				t.Errorf("%s pod label %s = %q, want the operator's %q", name, nameLabel, got[nameLabel], appValkey)
 			}
 		})
 	}
