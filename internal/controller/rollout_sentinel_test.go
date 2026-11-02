@@ -266,6 +266,24 @@ func TestHandOverMasterReplicaBehind(t *testing.T) {
 	}
 }
 
+// A replica that is not linked to the master (for example one that cannot
+// authenticate to it) cannot catch up: the handover gives up before pausing the
+// writes, instead of pausing them on every retry (#97).
+func TestHandOverMasterReplicaNotLinked(t *testing.T) {
+	notLinked := strings.Replace(caughtUpMasterInfo, "connected_slaves:2", "connected_slaves:1", 1)
+	master, _, dial := handoverMocks(t, notLinked)
+	failover := func() error {
+		t.Error("SENTINEL FAILOVER issued while a replica was not linked")
+		return nil
+	}
+	if err := handOverMaster(context.Background(), dial, failover, "master", []string{"r1", "r2"}, 6379, testHandoverTimings); err == nil {
+		t.Fatal("handOverMaster succeeded with a replica not linked")
+	}
+	if got := handoverSteps(master); len(got) != 0 {
+		t.Errorf("master commands = %v, want none (no pause)", got)
+	}
+}
+
 // When no replica reports itself promoted, the old master is left as it is for
 // the Sentinels, and the pause is lifted.
 func TestHandOverMasterNoPromotion(t *testing.T) {

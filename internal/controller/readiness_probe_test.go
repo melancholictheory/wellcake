@@ -54,12 +54,14 @@ func TestDataReadinessProbe(t *testing.T) {
 		exit  int
 		ready bool
 	}{
-		"in sync":                {info("0", "0"), 0, true},
-		"loading an RDB":         {info("1", "0"), 0, false},
-		"receiving the RDB":      {info("0", "1"), 0, false},
-		"primary, link down":     {"# Persistence\r\nloading:0\r\n# Replication\r\nrole:master\r\nconnected_slaves:0\r\n", 0, true},
-		"NOAUTH (old password)":  {"NOAUTH Authentication required.\n", 0, true},
-		"server does not answer": {"Could not connect to Valkey at 127.0.0.1:6379: Connection refused\n", 1, false},
+		"in sync":                  {info("0", "0"), 0, true},
+		"loading an RDB":           {info("1", "0"), 0, false},
+		"receiving the RDB":        {info("0", "1"), 0, false},
+		"primary, link down":       {"# Persistence\r\nloading:0\r\n# Replication\r\nrole:master\r\nconnected_slaves:0\r\n", 0, true},
+		"NOAUTH (old password)":    {"NOAUTH Authentication required.\n", 0, true},
+		"never linked since start": {"# Replication\r\nrole:slave\r\nmaster_link_status:down\r\nmaster_sync_in_progress:0\r\nmaster_link_down_since_seconds:-1\r\n", 0, false},
+		"link lost after a sync":   {"# Replication\r\nrole:slave\r\nmaster_link_status:down\r\nmaster_sync_in_progress:0\r\nmaster_link_down_since_seconds:6\r\n", 0, true},
+		"server does not answer":   {"Could not connect to Valkey at 127.0.0.1:6379: Connection refused\n", 1, false},
 	} {
 		if got := run(c.reply, c.exit); got != c.ready {
 			t.Errorf("%s: ready = %v, want %v", name, got, c.ready)

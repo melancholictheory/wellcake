@@ -1811,8 +1811,9 @@ func defaultAntiAffinity(vc *cachev1beta1.ValkeyCluster) *corev1.Affinity {
 }
 
 // dataReadinessProbe keeps a data pod not Ready while it does not hold the data
-// yet: while it loads an RDB (loading:1, from disk or from a full resync) and
-// while a replica receives one from its primary (master_sync_in_progress:1).
+// yet: while it loads an RDB (loading:1, from disk or from a full resync), while
+// a replica receives one from its primary (master_sync_in_progress:1), and while
+// a replica has never reached its primary since it started.
 // A TCP check passes as soon as the port opens, so a rolling update could move
 // on and restart the primary while the replica to promote is still loading.
 // master_link_status is left out on purpose: during a failover every replica
@@ -1828,7 +1829,14 @@ func dataReadinessProbe(vc *cachev1beta1.ValkeyCluster, port int32) *corev1.Prob
 		cli += noAuthWarningArgs
 	}
 	script := "out=$(" + cli + " INFO persistence replication) || exit 1\n" +
-		"! printf '%s\\n' \"$out\" | tr -d '\\r' | grep -qE '^(loading|master_sync_in_progress):1$'"
+		"out=$(printf '%s\\n' \"$out\" | tr -d '\\r')\n" +
+		"printf '%s\\n' \"$out\" | grep -qE '^(loading|master_sync_in_progress):1$' && exit 1\n" +
+		// A replica whose link has been down since it started (link down and
+		// master_link_down_since_seconds:-1) never synced and holds no data, for
+		// example one that cannot authenticate to its primary. One whose link
+		// dropped after a sync (a failover) keeps a positive value and stays Ready.
+		"printf '%s\\n' \"$out\" | grep -q '^master_link_status:down$' && printf '%s\\n' \"$out\" | grep -q '^master_link_down_since_seconds:-1$' && exit 1\n" +
+		"exit 0"
 	return &corev1.Probe{
 		ProbeHandler:        corev1.ProbeHandler{Exec: &corev1.ExecAction{Command: []string{shellCmd, "-c", script}}},
 		InitialDelaySeconds: 5,
