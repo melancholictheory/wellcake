@@ -310,7 +310,7 @@ echo "ok"
 				ObjectMeta: metav1.ObjectMeta{Labels: labels},
 				Spec: batchv1.JobSpec{
 					Template: corev1.PodTemplateSpec{
-						ObjectMeta: metav1.ObjectMeta{Labels: labels},
+						ObjectMeta: metav1.ObjectMeta{Labels: podLabelsFor(vc, labels)},
 						Spec: corev1.PodSpec{
 							RestartPolicy: corev1.RestartPolicyOnFailure,
 							InitContainers: []corev1.Container{{

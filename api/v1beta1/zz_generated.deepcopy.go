@@ -600,6 +600,13 @@ func (in *ValkeyClusterSpec) DeepCopyInto(out *ValkeyClusterSpec) {
 		*out = make([]corev1.LocalObjectReference, len(*in))
 		copy(*out, *in)
 	}
+	if in.PodLabels != nil {
+		in, out := &in.PodLabels, &out.PodLabels
+		*out = make(map[string]string, len(*in))
+		for key, val := range *in {
+			(*out)[key] = val
+		}
+	}
 	if in.Shards != nil {
 		in, out := &in.Shards, &out.Shards
 		*out = new(int32)

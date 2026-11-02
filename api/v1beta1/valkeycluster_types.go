@@ -90,6 +90,17 @@ type ValkeyClusterSpec struct {
 	// +optional
 	ImagePullSecrets []corev1.LocalObjectReference `json:"imagePullSecrets,omitempty"`
 
+	// PodLabels are extra labels on every operator-managed pod: the Valkey and
+	// Sentinel pods, and the backup, restore and cluster-operation Job pods.
+	// For example the labels a label-based network policy or firewall selects,
+	// such as egress to the backup bucket. Keys under the operator's prefixes,
+	// valkey.wellcake.io/, cache.wellcake.io/ and app.kubernetes.io/, are
+	// rejected: the operator manages labels there, some only on the live pods.
+	// Changing it rolls the pods.
+	// +optional
+	// +kubebuilder:validation:XValidation:rule="self.all(k, !k.startsWith('valkey.wellcake.io/') && !k.startsWith('cache.wellcake.io/') && !k.startsWith('app.kubernetes.io/'))",message="podLabels must not use the operator's label prefixes"
+	PodLabels map[string]string `json:"podLabels,omitempty"`
+
 	// Replicas is the number of Valkey instances for Standalone/Replication
 	// (1 primary + Replicas-1 replicas). IGNORED for Cluster topology — there the
 	// node count is derived from Shards*(1+ReplicasPerShard); set those instead.

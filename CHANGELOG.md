@@ -4,6 +4,21 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims to
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `spec.podLabels` on `ValkeyCluster` (v1beta1 and v1alpha1) adds labels to
+  every pod the operator creates: the Valkey and Sentinel StatefulSets
+  (including per-shard ones), the backup CronJob, and the restore and cluster
+  bootstrap/scale/reshard Jobs. It is meant for label-based network policies
+  or firewalls, for example to let the backup and `restoreFrom` pods reach the
+  bucket. Keys under the operator's prefixes (`valkey.wellcake.io/`,
+  `cache.wellcake.io/`, `app.kubernetes.io/`) are rejected, so a user label
+  cannot collide with a label the selectors and Services rely on. Leaving it
+  unset changes nothing, so upgrading the operator does not restart existing
+  clusters. The `valkey-cluster` chart exposes it as `podLabels`.
+
 ## [0.13.1]
 
 ### Fixed
