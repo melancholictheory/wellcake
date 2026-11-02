@@ -8,6 +8,13 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- In the Sentinel topology, a data pod no longer starts as a second primary when
+  the Sentinels answer but reject its password (#99). Its init took "no answer"
+  for a first bootstrap, so pod-0 started as the primary with whatever was on
+  its volume, next to the real one. It now fails and retries until a Sentinel
+  accepts the password; the primary guard does the same. The proactive rollout
+  also waits when more than one data pod reports `role:master` instead of
+  picking one and rolling the other as a stale replica.
 - Turning `auth` on for a running cluster with replicas is now rejected (#97).
   Each replica restarted with a password its primary did not have yet, never
   synced, and still turned Ready, so a rollout could promote an empty replica

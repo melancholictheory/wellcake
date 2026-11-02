@@ -78,6 +78,10 @@ func (r *ValkeyClusterReconciler) driveSentinelRollout(
 		survey := r.surveyReplication(ctx, vc, password)
 		master := sentinelDataMaster(vc, survey)
 		if master == "" {
+			if countReachableMasters(survey) > 1 {
+				log.Info("proactive sentinel rollout: more than one data pod reports role:master, waiting",
+					"name", vc.Name)
+			}
 			return true, nil
 		}
 		action := nextRolloutStep(dataPods, dataRev, master)
@@ -156,13 +160,30 @@ func anyStale(pods []rolloutPod, desiredRevision string) bool {
 // sentinelDataMaster returns the pod name of the reachable data node that INFO
 // reports as the master, or "" if none is currently visible.
 func sentinelDataMaster(vc *cachev1beta1.ValkeyCluster, survey []podRole) string {
+	master := ""
 	for i := range survey {
 		s := survey[i]
 		if s.reachable && s.role == roleMaster {
-			return podName(vc, s.ordinal)
+			if master != "" {
+				// Two data pods claim to be the primary: picking one would roll the
+				// other (maybe the one with the data) as a stale replica. Wait until
+				// the Sentinels have demoted one of them.
+				return ""
+			}
+			master = podName(vc, s.ordinal)
 		}
 	}
-	return ""
+	return master
+}
+
+func countReachableMasters(survey []podRole) int {
+	n := 0
+	for _, s := range survey {
+		if s.reachable && s.role == roleMaster {
+			n++
+		}
+	}
+	return n
 }
 
 // sentinelStatefulSetName is the name shared by the Sentinel StatefulSet and its
