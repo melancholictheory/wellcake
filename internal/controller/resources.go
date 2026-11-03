@@ -936,6 +936,10 @@ query_sentinels() {
   # a reply is not "no Sentinel": the cluster exists and holds a primary, the
   # password just does not match yet (rotation or auth change in progress).
   AUTH_REJECTED=0
+  # Sentinels that answered, and whether any of them knows a replica
+  # (num-slaves, -1 when missing from the reply, counted as known).
+  ANSWERED=0
+  REPLICA_KNOWN=0
   # The Sentinel count is not rendered here: it would put spec.sentinel.replicas
   # in the pod template and roll the data pods on every Sentinel scale. Start
   # at the CRD minimum and raise the bound to what the Sentinels report.
@@ -946,8 +950,12 @@ query_sentinels() {
     case "$OUT" in
       *NOAUTH*|*WRONGPASS*) AUTH_REJECTED=$((AUTH_REJECTED + 1)) ;;
     esac
-    set -- $(printf '%%s\n' "$OUT" | awk 'NR %% 2 == 1 { k = $0 } NR %% 2 == 0 { v[k] = $0 } END { if (v["ip"] != "" && v["config-epoch"] ~ /^[0-9]+$/ && v["num-other-sentinels"] ~ /^[0-9]+$/) print v["ip"], v["port"], v["config-epoch"], v["num-other-sentinels"] }')
-    if [ "$#" -eq 4 ]; then
+    set -- $(printf '%%s\n' "$OUT" | awk 'NR %% 2 == 1 { k = $0 } NR %% 2 == 0 { v[k] = $0 } END { if (v["ip"] != "" && v["config-epoch"] ~ /^[0-9]+$/ && v["num-other-sentinels"] ~ /^[0-9]+$/) print v["ip"], v["port"], v["config-epoch"], v["num-other-sentinels"], (v["num-slaves"] ~ /^[0-9]+$/ ? v["num-slaves"] : -1) }')
+    if [ "$#" -eq 5 ]; then
+      ANSWERED=$((ANSWERED + 1))
+      if [ "$5" -ne 0 ]; then
+        REPLICA_KNOWN=1
+      fi
       if [ "$(($4 + 1))" -gt "$n" ]; then
         n=$(($4 + 1))
       fi
@@ -1010,11 +1018,16 @@ func sentinelPrimaryGuardActive(vc *cachev1beta1.ValkeyCluster) bool {
 //     the primary with that RDB, or with no data, because its replicas would
 //     resync from it. It waits without listening, the Sentinels see the primary
 //     down and promote a replica that holds the data, and the pod then starts
-//     as a replica of it. With no failover before the deadline (no replica to
-//     promote) it starts as the primary with what is on disk.
+//     as a replica of it. With no failover before the deadline it starts as
+//     the primary with what is on disk.
 //
-// On the first bootstrap no Sentinel knows a primary yet and pod-0 starts as
-// the primary, as before.
+// A Sentinel only promotes a replica it knows, and it learns replicas from the
+// primary's INFO, which this pod does not serve while it waits. So when every
+// Sentinel answers and none knows a replica, no failover can come and the pod
+// starts as the primary at once. This is the first bootstrap: the Sentinels
+// start out monitoring pod-0 from the ConfigMap, with no replica, and would
+// otherwise hold pod-0 back for the whole deadline. When no Sentinel answers
+// yet, pod-0 starts as the primary, as before.
 func renderSentinelPrimaryGuard(vc *cachev1beta1.ValkeyCluster) string {
 	return "set -eu\n" + sentinelDiscoveryFuncs(vc) + fmt.Sprintf(`CONF=%[1]s/runtime.conf
 if grep -q '^replicaof ' "$CONF"; then
@@ -1023,9 +1036,17 @@ else
   query_sentinels
   refuse_on_auth_rejection
   if [ -n "$BEST_HOST" ] && is_self "$BEST_HOST"; then
-    echo "persistence is off and the Sentinels report this pod as the primary: waiting for them to fail over to a replica that holds the data"
     DEADLINE=$(($(date +%%s) + %[2]d))
+    WAITING=""
     while :; do
+      if [ "$ANSWERED" -ge "$n" ] && [ "$REPLICA_KNOWN" -eq 0 ] && [ -n "$BEST_HOST" ] && is_self "$BEST_HOST"; then
+        echo "all $n Sentinels answered and none knows a replica to promote: starting as the primary with the data on disk"
+        break
+      fi
+      if [ -z "$WAITING" ]; then
+        echo "persistence is off and the Sentinels report this pod as the primary: waiting for them to fail over to a replica that holds the data"
+        WAITING=1
+      fi
       sleep 3
       query_sentinels
       if [ -n "$BEST_HOST" ] && ! is_self "$BEST_HOST" && is_primary "$BEST_HOST" "$BEST_PORT"; then

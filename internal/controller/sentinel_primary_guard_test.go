@@ -123,6 +123,34 @@ func TestSentinelPrimaryGuardNeverRestartsAsPrimaryFromDisk(t *testing.T) {
 		t.Errorf("without a failover the pod should start as primary with its data:\n%s", conf)
 	}
 
+	// First bootstrap once the Sentinels are up: they monitor pod-0 from the
+	// ConfigMap and know no replica, so no failover can come. Start at once.
+	seeded := func(slaves ...int) map[string]string {
+		m := map[string]string{}
+		for i, n := range slaves {
+			m[fmt.Sprintf("s-sentinel-%d.s-sentinel", i)] = fmt.Sprintf("name mymaster ip s-0.s-headless.ns.svc.cluster.local port 6379 config-epoch 0 num-other-sentinels 2 num-slaves %d", n)
+		}
+		return m
+	}
+	conf, out, rdb = runPrimaryGuard(t, vc, "", seeded(0, 0, 0), nil)
+	if !rdb || strings.Contains(conf, "replicaof") || strings.Contains(out, "waiting") {
+		t.Errorf("seeded Sentinels with no replica should let pod-0 start at once with its data:\n%s\n%s", conf, out)
+	}
+
+	// A Sentinel that does not answer may know a replica: wait until all answer.
+	partial := seeded(0, 0, 0)
+	delete(partial, "s-sentinel-2.s-sentinel")
+	conf, out, rdb = runPrimaryGuard(t, vc, "", partial, seeded(0, 0, 0))
+	if !rdb || strings.Contains(conf, "replicaof") || !strings.Contains(out, "waiting") || !strings.Contains(out, "all 3 Sentinels answered") {
+		t.Errorf("pod-0 should wait for the missing Sentinel, then start:\n%s\n%s", conf, out)
+	}
+
+	// One Sentinel knows a replica: a failover is possible, so keep waiting.
+	_, out, _ = runPrimaryGuard(t, vc, "", seeded(0, 2, 0), nil)
+	if !strings.Contains(out, "no failover within") {
+		t.Errorf("a Sentinel that knows a replica should keep the wait:\n%s", out)
+	}
+
 	// Persistence on: the container starts valkey-server directly.
 	vc.Spec.Profile = cachev1beta1.ProfileDurable
 	if sentinelPrimaryGuardActive(vc) {
