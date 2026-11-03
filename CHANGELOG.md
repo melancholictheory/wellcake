@@ -6,6 +6,16 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- In the Sentinel topology with persistence off, a new cluster no longer waits
+  90 s for its primary. The Sentinels start out monitoring pod-0, so pod-0's
+  primary guard took itself for a restarted primary and waited for a failover
+  to a replica that holds the data. No failover can come while the Sentinels
+  know no replica, so pod-0 now starts as the primary once all the Sentinels
+  answer and none knows one. A restarted primary still waits: the Sentinels
+  know its replicas. This also shortens a restore with `restoreFrom`.
+
 ## [0.14.1]
 
 ### Added
