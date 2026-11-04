@@ -35,7 +35,7 @@ Short names: `vk`, `vkc`. Printer columns: `Topology`, `Replicas`,
 | `sentinel.failoverTimeout`    | int32 ≥0 (ms)              | `60000`        | `sentinel failover-timeout`. `0` → default. Applied to running Sentinels with `SENTINEL SET`, no restart. |
 | `resources`                   | k8s ResourceRequirements   | —              | Applied to the Valkey container. `maxmemory` is automatically set to 60% of `limits.memory` unless overridden in `spec.config.maxmemory`. |
 | `storage`                     | `StorageSpec`              | —              | |
-| `storage.size`                | resource.Quantity          | `10Gi`         | **Expand-only** (CEL). The Cache profile defaults to 1Gi. |
+| `storage.size`                | resource.Quantity          | profile        | **Expand-only** (CEL). Empty → Cache 1Gi, Durable 10Gi. With `medium: Memory` it caps the tmpfs. |
 | `storage.storageClassName`    | *string                    | —              | **Immutable** (CEL). |
 | `storage.mode`                | `rdb\|aof\|both\|none`     | `rdb`          | **Immutable** (CEL). The kubebuilder default `rdb` is applied by admission; the profile-dependent default (Cache→`none`, Durable→`both`) only kicks in when `mode` is empty. |
 | `storage.medium`              | `Disk\|Memory`            | `Disk`         | **Immutable** (CEL). `Memory` is a tmpfs/RAM emptyDir (PoC): no PVC/StorageClass, counts against the pod's memory limit (not ephemeral-storage → not subject to nodefs eviction). Cache only; forbidden with Durable (CEL); persistence is forced to `none`. |

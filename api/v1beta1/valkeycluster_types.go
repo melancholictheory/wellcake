@@ -498,8 +498,11 @@ type NetworkPolicyEgressSpec struct {
 type StorageSpec struct {
 	// Size of each PVC, e.g. "10Gi". Expand-only: the value may grow but never
 	// shrink (PVC expansion in k8s only works upwards anyway, and only if the
-	// StorageClass has AllowVolumeExpansion=true).
-	// +kubebuilder:default="10Gi"
+	// StorageClass has AllowVolumeExpansion=true). Empty: the profile default
+	// (Cache 1Gi, Durable 10Gi). With medium=Memory it caps the tmpfs instead.
+	// No kubebuilder default on purpose: admission would set it whenever a
+	// storage block is present (e.g. only mode or medium) and hide the profile
+	// default.
 	// +kubebuilder:validation:XValidation:rule="quantity(self).compareTo(quantity(oldSelf)) >= 0",message="storage size cannot shrink"
 	Size resource.Quantity `json:"size,omitempty"`
 

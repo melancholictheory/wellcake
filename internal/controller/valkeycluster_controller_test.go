@@ -307,6 +307,35 @@ var _ = Describe("ValkeyCluster CRD schema (envtest)", func() {
 			Expect(err.Error()).To(ContainSubstring("storage mode is immutable"))
 		})
 	})
+
+	Context("storage.size default", func() {
+		// The chart renders a storage block with only mode (or medium) set. Built
+		// unstructured, as a typed StorageSpec always sends size ("0").
+		for _, tc := range []struct {
+			name    string
+			storage map[string]any
+		}{
+			{"mode only", map[string]any{"mode": "none"}},
+			{"medium only", map[string]any{"medium": "Memory"}},
+		} {
+			It("leaves size empty when the storage block has "+tc.name+", so the Cache profile default applies", func() {
+				u := &unstructured.Unstructured{Object: map[string]any{
+					"metadata": map[string]any{"name": "storage-default-" + strings.ReplaceAll(tc.name, " ", "-"), "namespace": ns},
+					"spec":     map[string]any{"profile": "Cache", "storage": tc.storage},
+				}}
+				u.SetGroupVersionKind(cachev1beta1.GroupVersion.WithKind("ValkeyCluster"))
+				Expect(k8sClient.Create(ctx, u)).To(Succeed())
+				DeferCleanup(func() { _ = k8sClient.Delete(ctx, u) })
+
+				var got cachev1beta1.ValkeyCluster
+				Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(u), &got)).To(Succeed())
+				Expect(got.Spec.Storage.Size.IsZero()).To(BeTrue(), "size defaulted to %s", got.Spec.Storage.Size.String())
+				Expect(memoryDataSizeLimit(&got).String()).To(Equal(defaultCacheDataSize))
+				pvc := buildDataPVC(&got)
+				Expect(pvc.Spec.Resources.Requests.Storage().String()).To(Equal(defaultCacheDataSize))
+			})
+		}
+	})
 })
 
 var _ = Describe("ValkeyCluster reconcile (envtest)", func() {

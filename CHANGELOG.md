@@ -15,6 +15,11 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   know no replica, so pod-0 now starts as the primary once all the Sentinels
   answer and none knows one. A restarted primary still waits: the Sentinels
   know its replicas. This also shortens a restore with `restoreFrom`.
+- An empty `storage.size` now takes the profile default (Cache 1Gi, Durable
+  10Gi). The CRD defaulted it to 10Gi as soon as a `storage` block was set, for
+  example `storage.mode: none` from the chart, so a Cache cluster got 10Gi PVCs
+  and a `medium: Memory` tmpfs was capped at 10Gi instead of 1Gi. Existing
+  clusters keep their stored size and their PVCs.
 
 ## [0.14.1]
 
