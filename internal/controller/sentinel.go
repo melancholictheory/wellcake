@@ -34,6 +34,11 @@ const (
 	sentinelPlaneLabel = "valkey.wellcake.io/plane"
 	sentinelMasterName = "mymaster"
 	sentinelConfigName = "sentinel.conf"
+	// Port of the Sentinel exporter sidecar (spec.metrics.sentinel): the
+	// container port name (15 characters max) and the Sentinel Service port
+	// the ServiceMonitor scrapes.
+	sentinelExporterPortName = "exporter"
+	sentinelMetricsPortName  = "sentinel-metrics"
 	// sentinelACLUser is the dedicated ACL user (seeded on the data nodes by
 	// renderInitScript) that Sentinel authenticates as when reaching the
 	// monitored master — least data exposure vs the default user.
@@ -352,6 +357,14 @@ func (r *ValkeyClusterReconciler) ensureSentinelService(ctx context.Context, vc 
 			}},
 		},
 	}
+	if sentinelMetricsEnabled(vc) {
+		svc.Spec.Ports = append(svc.Spec.Ports, corev1.ServicePort{
+			Name:       sentinelMetricsPortName,
+			Port:       exporterPort,
+			TargetPort: intstr.FromString(sentinelExporterPortName),
+			Protocol:   corev1.ProtocolTCP,
+		})
+	}
 	if err := controllerutil.SetControllerReference(vc, svc, r.Scheme); err != nil {
 		return err
 	}
@@ -458,7 +471,7 @@ func buildSentinelStatefulSet(vc *cachev1beta1.ValkeyCluster, proactive bool) *a
 		pvc.Spec.StorageClassName = vc.Spec.Storage.StorageClassName
 	}
 
-	return &appsv1.StatefulSet{
+	sts := &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      sentinelStatefulSetName(vc),
 			Namespace: vc.Namespace,
@@ -513,6 +526,10 @@ func buildSentinelStatefulSet(vc *cachev1beta1.ValkeyCluster, proactive bool) *a
 			VolumeClaimTemplates: []corev1.PersistentVolumeClaim{pvc},
 		},
 	}
+	if sentinelMetricsEnabled(vc) {
+		sts.Spec.Template.Spec.Containers = append(sts.Spec.Template.Spec.Containers, buildSentinelExporter(vc))
+	}
+	return sts
 }
 
 // sentinelAffinity is the default pod anti-affinity plus the node affinity of

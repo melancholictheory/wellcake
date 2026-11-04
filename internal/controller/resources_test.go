@@ -2088,14 +2088,15 @@ func TestBackupAndRestoreJobsHaveRestrictedSecurityContext(t *testing.T) {
 // the data pods and the Sentinel pods carry identical labels, so a Service selector
 // cannot tell them apart. Each Service must target a named port that only its own
 // pods declare, which keeps the other workload out of its EndpointSlices (no client
-// traffic or metrics scrape lands on a pod that does not serve that port).
+// traffic or metrics scrape lands on a pod that does not serve that port). Both
+// workloads run an exporter here (metrics.sentinel), on differently named ports.
 func TestServicesTargetNamedPorts(t *testing.T) {
 	vc := &cachev1beta1.ValkeyCluster{
 		ObjectMeta: metav1.ObjectMeta{Name: "s", Namespace: "ns"},
 		Spec: cachev1beta1.ValkeyClusterSpec{
 			Topology: cachev1beta1.TopologySentinel, Replicas: 3,
 			Sentinel: &cachev1beta1.SentinelSpec{Replicas: 3, Quorum: 2},
-			Metrics:  &cachev1beta1.MetricsSpec{Enabled: true},
+			Metrics:  &cachev1beta1.MetricsSpec{Enabled: true, Sentinel: true},
 		},
 	}
 	portNames := func(spec corev1.PodSpec) map[string]bool {

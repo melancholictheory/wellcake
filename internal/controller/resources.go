@@ -1716,6 +1716,27 @@ func defaultTopologySpread(vc *cachev1beta1.ValkeyCluster) []corev1.TopologySpre
 }
 
 func buildExporter(vc *cachev1beta1.ValkeyCluster) corev1.Container {
+	port := valkeyPort
+	if tlsEnabled(vc) {
+		port = valkeyTLSPort
+	}
+	return exporterContainer(vc, port, metricsPortName)
+}
+
+// buildSentinelExporter is the exporter sidecar of a Sentinel pod
+// (spec.metrics.sentinel). redis_exporter detects a Sentinel from its INFO and
+// exports the redis_sentinel_* metrics. The data pods and the Sentinel pods
+// share their labels, so its port is not named metricsPortName: the client
+// Service targets that name and would route to the Sentinel pods too.
+func buildSentinelExporter(vc *cachev1beta1.ValkeyCluster) corev1.Container {
+	c := exporterContainer(vc, sentinelListenPort(vc), sentinelExporterPortName)
+	c.SecurityContext = containerSecurityContext(vc)
+	return c
+}
+
+// exporterContainer is a redis_exporter sidecar scraping the local listener on
+// port, its own port named portName.
+func exporterContainer(vc *cachev1beta1.ValkeyCluster, port int32, portName string) corev1.Container {
 	image := vc.Spec.Metrics.Image
 	if image == "" {
 		image = "oliver006/redis_exporter:v1.62.0"
@@ -1723,10 +1744,6 @@ func buildExporter(vc *cachev1beta1.ValkeyCluster) corev1.Container {
 	scheme := "redis"
 	if tlsEnabled(vc) {
 		scheme = "rediss"
-	}
-	port := valkeyPort
-	if tlsEnabled(vc) {
-		port = valkeyTLSPort
 	}
 	env := []corev1.EnvVar{
 		{Name: "REDIS_ADDR", Value: fmt.Sprintf("%s://localhost:%d", scheme, port)},
@@ -1765,7 +1782,7 @@ func buildExporter(vc *cachev1beta1.ValkeyCluster) corev1.Container {
 		Image:           image,
 		ImagePullPolicy: vc.Spec.Metrics.ImagePullPolicy,
 		Env:             env,
-		Ports:           []corev1.ContainerPort{{Name: metricsPortName, ContainerPort: exporterPort}},
+		Ports:           []corev1.ContainerPort{{Name: portName, ContainerPort: exporterPort}},
 		Resources:       vc.Spec.Metrics.Resources,
 	}
 }
@@ -1977,6 +1994,12 @@ func caCertPath(vc *cachev1beta1.ValkeyCluster) string {
 
 func metricsEnabled(vc *cachev1beta1.ValkeyCluster) bool {
 	return vc.Spec.Metrics != nil && vc.Spec.Metrics.Enabled
+}
+
+// sentinelMetricsEnabled reports whether the Sentinel pods get the exporter
+// sidecar too (spec.metrics.sentinel, Sentinel topology only).
+func sentinelMetricsEnabled(vc *cachev1beta1.ValkeyCluster) bool {
+	return metricsEnabled(vc) && vc.Spec.Metrics.Sentinel && vc.Spec.Topology == cachev1beta1.TopologySentinel
 }
 
 func condStatus(ok bool) metav1.ConditionStatus {

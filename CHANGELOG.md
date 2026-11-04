@@ -6,6 +6,13 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- In the Sentinel topology, `spec.metrics.sentinel` adds the exporter sidecar
+  to the Sentinel pods (`redis_sentinel_*` metrics). Off by default, so the
+  upgrade restarts nothing; turning it on rolls the Sentinel pods once. The
+  valkey-cluster chart sets it from `metrics.sentinel`.
+
 ### Fixed
 
 - In the Sentinel topology with persistence off, a new cluster no longer waits

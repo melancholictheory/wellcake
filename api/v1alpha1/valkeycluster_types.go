@@ -582,6 +582,13 @@ type MetricsSpec struct {
 	// without requests or limits.
 	// +optional
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+
+	// Sentinel adds the exporter sidecar to the Sentinel pods too, with the same
+	// image, pull policy and resources, for the redis_sentinel_* metrics. Ignored
+	// outside the Sentinel topology or without enabled. Changing it rolls the
+	// Sentinel pods.
+	// +optional
+	Sentinel bool `json:"sentinel,omitempty"`
 }
 
 // SentinelSpec configures Sentinel topology specifics.

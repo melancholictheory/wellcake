@@ -1415,6 +1415,13 @@ spec:
                           More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
                         type: object
                     type: object
+                  sentinel:
+                    description: |-
+                      Sentinel adds the exporter sidecar to the Sentinel pods too, with the same
+                      image, pull policy and resources, for the redis_sentinel_* metrics. Ignored
+                      outside the Sentinel topology or without enabled. Changing it rolls the
+                      Sentinel pods.
+                    type: boolean
                   serviceMonitor:
                     description: ServiceMonitor creates a Prometheus Operator ServiceMonitor.
                     type: boolean
@@ -4718,6 +4725,13 @@ spec:
                           More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
                         type: object
                     type: object
+                  sentinel:
+                    description: |-
+                      Sentinel adds the exporter sidecar to the Sentinel pods too, with the same
+                      image, pull policy and resources, for the redis_sentinel_* metrics. Ignored
+                      outside the Sentinel topology or without enabled. Changing it rolls the
+                      Sentinel pods.
+                    type: boolean
                   serviceMonitor:
                     description: ServiceMonitor creates a Prometheus Operator ServiceMonitor.
                     type: boolean

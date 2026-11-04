@@ -666,6 +666,22 @@ func (r *ValkeyClusterReconciler) ensureMetricsServiceMonitor(ctx context.Contex
 	for k, v := range labelsFor(vc) {
 		matchLabels[k] = v
 	}
+	endpoints := []any{
+		map[string]any{
+			"port":     metricsPortName,
+			"interval": "30s",
+			"path":     "/metrics",
+		},
+	}
+	if sentinelMetricsEnabled(vc) {
+		// Only the Sentinel Service has this port, so the Sentinel pods are
+		// scraped once, through it.
+		endpoints = append(endpoints, map[string]any{
+			"port":     sentinelMetricsPortName,
+			"interval": "30s",
+			"path":     "/metrics",
+		})
+	}
 	sm.Object["spec"] = map[string]any{
 		"selector": map[string]any{
 			"matchLabels": matchLabels,
@@ -673,13 +689,7 @@ func (r *ValkeyClusterReconciler) ensureMetricsServiceMonitor(ctx context.Contex
 		"namespaceSelector": map[string]any{
 			"matchNames": []any{vc.Namespace},
 		},
-		"endpoints": []any{
-			map[string]any{
-				"port":     metricsPortName,
-				"interval": "30s",
-				"path":     "/metrics",
-			},
-		},
+		"endpoints": endpoints,
 	}
 	if err := controllerutil.SetControllerReference(vc, sm, r.Scheme); err != nil {
 		return err
