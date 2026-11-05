@@ -40,7 +40,7 @@ Short names: `vk`, `vkc`. Printer columns: `Topology`, `Replicas`,
 | `storage.mode`                | `rdb\|aof\|both\|none`     | `rdb`          | **Immutable** (CEL). The kubebuilder default `rdb` is applied by admission; the profile-dependent default (Cache→`none`, Durable→`both`) only kicks in when `mode` is empty. |
 | `storage.medium`              | `Disk\|Memory`            | `Disk`         | **Immutable** (CEL). `Memory` is a tmpfs/RAM emptyDir (PoC): no PVC/StorageClass, counts against the pod's memory limit (not ephemeral-storage → not subject to nodefs eviction). Cache only; forbidden with Durable (CEL); persistence is forced to `none`. |
 | `auth`                        | `AuthSpec`                 | enabled        | |
-| `auth.enabled`                | bool                       | `true`         | Enables `requirepass`. |
+| `auth.enabled`                | bool                       | `true`         | Enables `requirepass`. Fixed after creation except for Standalone (CEL). |
 | `auth.existingSecret`         | string                     | —              | Secret with a `password` key. If empty, the operator generates one. |
 | `tls`                         | `TLSSpec`                  | disabled       | |
 | `tls.enabled`                 | bool                       | `false`        | |

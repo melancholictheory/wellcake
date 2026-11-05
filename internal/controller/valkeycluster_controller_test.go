@@ -200,8 +200,8 @@ var _ = Describe("ValkeyCluster CRD schema (envtest)", func() {
 
 	// Turning auth on restarts each replica with a password its primary does not
 	// have, so it never syncs and a rollout promotes an empty replica (#97).
-	Context("CEL rule on enabling auth", func() {
-		const msg = "auth cannot be turned on for a running cluster with replicas"
+	Context("CEL rule on toggling auth", func() {
+		const msg = "auth cannot be turned on or off for a running cluster with replicas"
 		mk := func(name string, topo cachev1beta1.Topology, auth *cachev1beta1.AuthSpec) *cachev1beta1.ValkeyCluster {
 			vc := &cachev1beta1.ValkeyCluster{
 				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
@@ -244,11 +244,31 @@ var _ = Describe("ValkeyCluster CRD schema (envtest)", func() {
 			Expect(err.Error()).To(ContainSubstring(msg))
 		})
 
-		It("allows it on Standalone, and allows turning auth off", func() {
+		It("rejects enabled: true -> false with replicas", func() {
+			vc := mk("cel-auth-off", cachev1beta1.TopologyReplication, &cachev1beta1.AuthSpec{Enabled: new(true)})
+			err := update(vc, &cachev1beta1.AuthSpec{Enabled: new(false)})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring(msg))
+		})
+
+		It("rejects removing the auth block (enabled by default) with replicas", func() {
+			vc := mk("cel-auth-remove", cachev1beta1.TopologyReplication, &cachev1beta1.AuthSpec{})
+			err := update(vc, nil)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring(msg))
+		})
+
+		It("allows both ways on Standalone", func() {
 			sa := mk("cel-auth-standalone", cachev1beta1.TopologyStandalone, &cachev1beta1.AuthSpec{Enabled: new(false)})
 			Expect(update(sa, &cachev1beta1.AuthSpec{Enabled: new(true)})).To(Succeed())
-			on := mk("cel-auth-off", cachev1beta1.TopologyReplication, &cachev1beta1.AuthSpec{Enabled: new(true)})
-			Expect(update(on, &cachev1beta1.AuthSpec{Enabled: new(false)})).To(Succeed())
+			Expect(update(sa, &cachev1beta1.AuthSpec{Enabled: new(false)})).To(Succeed())
+		})
+
+		It("allows updates that keep auth as it is", func() {
+			on := mk("cel-auth-keep-on", cachev1beta1.TopologyReplication, &cachev1beta1.AuthSpec{})
+			Expect(update(on, &cachev1beta1.AuthSpec{Enabled: new(true)})).To(Succeed())
+			off := mk("cel-auth-keep-off", cachev1beta1.TopologyReplication, nil)
+			Expect(update(off, &cachev1beta1.AuthSpec{Enabled: new(false)})).To(Succeed())
 		})
 	})
 

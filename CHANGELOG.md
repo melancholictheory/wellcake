@@ -27,6 +27,14 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   example `storage.mode: none` from the chart, so a Cache cluster got 10Gi PVCs
   and a `medium: Memory` tmpfs was capped at 10Gi instead of 1Gi. Existing
   clusters keep their stored size and their PVCs.
+- Turning `auth` off for a running cluster with replicas is now rejected too,
+  like turning it on since #97 (#108). The data pods kept `requirepass` while
+  the operator surveyed them without a password: the proactive rollout waited
+  forever without a log line, the Sentinels kept refusing clients without the
+  password, and the way back was rejected. Without `proactive-rollout` a
+  restarted replica would come up without `masterauth` against a primary that
+  still requires it. Create a new cluster without auth instead. Standalone
+  clusters can still turn auth on and off.
 
 ## [0.14.1]
 
