@@ -72,6 +72,7 @@ spec:
     imagePullPolicy: {{ .Values.metrics.imagePullPolicy }}
     {{- end }}
     serviceMonitor: {{ .Values.metrics.serviceMonitor }}
+    sentinel: {{ .Values.metrics.sentinel }}
     {{- with .Values.metrics.resources }}
     resources:
       {{- toYaml . | nindent 6 }}

@@ -634,6 +634,29 @@ func TestSentinelAndExporterResources(t *testing.T) {
 	}
 }
 
+// metrics.sentinel adds the exporter to the Sentinel pods, scraping the local
+// Sentinel on its own port name; without it they keep a single container.
+func TestSentinelExporter(t *testing.T) {
+	vc := sentinelCR()
+	vc.Spec.Metrics = &cachev1beta1.MetricsSpec{Enabled: true}
+	if n := len(buildSentinelStatefulSet(vc, false).Spec.Template.Spec.Containers); n != 1 {
+		t.Fatalf("without metrics.sentinel: %d Sentinel containers, want 1", n)
+	}
+
+	vc.Spec.Metrics.Sentinel = true
+	containers := buildSentinelStatefulSet(vc, false).Spec.Template.Spec.Containers
+	if len(containers) != 2 {
+		t.Fatalf("with metrics.sentinel: %d Sentinel containers, want 2", len(containers))
+	}
+	exp := containers[1]
+	if exp.Env[0].Name != "REDIS_ADDR" || exp.Env[0].Value != "redis://localhost:26379" {
+		t.Errorf("exporter env = %+v, want REDIS_ADDR=redis://localhost:26379 first", exp.Env)
+	}
+	if exp.Ports[0].Name != sentinelExporterPortName {
+		t.Errorf("exporter port name = %q, want %q", exp.Ports[0].Name, sentinelExporterPortName)
+	}
+}
+
 // The Sentinel pods follow the data pods onto their nodes (node selector,
 // tolerations, node affinity) and take the image pull policy, but keep the
 // operator's pod anti-affinity and spread: the user's pod-level terms select

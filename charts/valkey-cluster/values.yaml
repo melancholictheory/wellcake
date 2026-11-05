@@ -100,6 +100,9 @@ metrics:
   serviceMonitor: false
   # Resources for the exporter container. Empty → none set.
   resources: {}
+  # Sentinel topology only, with enabled: the exporter on the Sentinel pods too
+  # (redis_sentinel_* metrics). Turning it on rolls the Sentinel pods.
+  sentinel: false
 
 # Free-form Valkey config directives appended to valkey.conf.
 config: {}
