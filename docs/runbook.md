@@ -37,33 +37,33 @@ kubectl -n valkey-system exec deploy/valkey-operator -- /manager --help
 
 ### Manager flags
 
-| Flag | Default | Purpose |
-| ---- | ------- | ------- |
-| `--metrics-bind-address` | `0` | Address of the metrics endpoint. `0` — disabled, `:8443` — HTTPS, `:8080` — HTTP. The chart sets it from `metrics.port`, or `0` when `metrics.enabled=false`. |
-| `--metrics-secure` | `true` | Serve metrics over HTTPS with an authn/authz filter. `--metrics-secure=false` — plain HTTP. |
-| `--health-probe-bind-address` | `:8081` | Address of the liveness/readiness probes (`/healthz`, `/readyz`). Chart sets it from `probes.port`. |
-| `--leader-elect` | `false` | Leader election: guarantees a single active manager. The chart enables it when `replicaCount > 1`. Lease ID is `1e0a58e3.wellcake.io`. |
-| `--enable-http2` | `false` | HTTP/2 for the metrics/webhook servers. Disabled by default due to a CVE (Rapid Reset). |
-| `--webhook-cert-path` | `""` | Directory holding the webhook certificate. Empty → controller-runtime generates a self-signed one. The chart mounts the cert-manager secret here when `webhooks.enabled=true`. |
-| `--webhook-cert-name` / `--webhook-cert-key` | `tls.crt` / `tls.key` | File names of the cert/key in the directory above. |
-| `--metrics-cert-path` | `""` | Directory holding the metrics server certificate (for TLS metrics via cert-manager). |
-| `--metrics-cert-name` / `--metrics-cert-key` | `tls.crt` / `tls.key` | File names of the cert/key for metrics. |
+| Flag                                         | Default               | Purpose                                                                                                                                                                        |
+| -------------------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--metrics-bind-address`                     | `0`                   | Address of the metrics endpoint. `0` — disabled, `:8443` — HTTPS, `:8080` — HTTP. The chart sets it from `metrics.port`, or `0` when `metrics.enabled=false`.                  |
+| `--metrics-secure`                           | `true`                | Serve metrics over HTTPS with an authn/authz filter. `--metrics-secure=false` — plain HTTP.                                                                                    |
+| `--health-probe-bind-address`                | `:8081`               | Address of the liveness/readiness probes (`/healthz`, `/readyz`). Chart sets it from `probes.port`.                                                                            |
+| `--leader-elect`                             | `false`               | Leader election: guarantees a single active manager. The chart enables it when `replicaCount > 1`. Lease ID is `1e0a58e3.wellcake.io`.                                         |
+| `--enable-http2`                             | `false`               | HTTP/2 for the metrics/webhook servers. Disabled by default due to a CVE (Rapid Reset).                                                                                        |
+| `--webhook-cert-path`                        | `""`                  | Directory holding the webhook certificate. Empty → controller-runtime generates a self-signed one. The chart mounts the cert-manager secret here when `webhooks.enabled=true`. |
+| `--webhook-cert-name` / `--webhook-cert-key` | `tls.crt` / `tls.key` | File names of the cert/key in the directory above.                                                                                                                             |
+| `--metrics-cert-path`                        | `""`                  | Directory holding the metrics server certificate (for TLS metrics via cert-manager).                                                                                           |
+| `--metrics-cert-name` / `--metrics-cert-key` | `tls.crt` / `tls.key` | File names of the cert/key for metrics.                                                                                                                                        |
 
 Logging (zap flags from controller-runtime):
 
-| Flag | Default | Purpose |
-| ---- | ------- | ------- |
-| `--zap-log-level` | `info` | `debug`/`info`/`error`, or a number. |
-| `--zap-encoder` | `json` (prod) | `json` or `console`. |
-| `--zap-stacktrace-level` | `error` | The level from which to emit stacktraces. |
-| `--zap-time-encoding` | `epoch` | Timestamp format. |
-| `--zap-devel` | `false` | Dev mode (console + debug). |
+| Flag                     | Default       | Purpose                                   |
+| ------------------------ | ------------- | ----------------------------------------- |
+| `--zap-log-level`        | `info`        | `debug`/`info`/`error`, or a number.      |
+| `--zap-encoder`          | `json` (prod) | `json` or `console`.                      |
+| `--zap-stacktrace-level` | `error`       | The level from which to emit stacktraces. |
+| `--zap-time-encoding`    | `epoch`       | Timestamp format.                         |
+| `--zap-devel`            | `false`       | Dev mode (console + debug).               |
 
 ### Environment variables
 
-| Env | Purpose |
-| --- | ------- |
-| `ENABLE_WEBHOOKS` | `="false"` disables registration of the validating webhooks (enabled by default). The chart sets it via `webhooks.enabled`. |
+| Env               | Purpose                                                                                                                                                                                                                                                |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ENABLE_WEBHOOKS` | `="false"` disables registration of the validating webhooks (enabled by default). The chart sets it via `webhooks.enabled`.                                                                                                                            |
 | `WATCH_NAMESPACE` | Restricts the operator's watch to the listed namespaces (comma-separated). Empty/unset → cluster-scoped (all namespaces). The chart sets it via `watchNamespace`; combine with `rbac.scope=namespace` so the ServiceAccount only gets namespaced RBAC. |
 
 ## kubectl plugin (`kubectl valkey`)
@@ -174,6 +174,7 @@ required**. The typical case: cert-manager renews the certificate on its
 own schedule.
 
 How it works:
+
 - The operator watches the TLS Secret (`<cluster>-tls` or
   `tls.existingSecret`) and compares the certificate's SHA-256 fingerprint
   against `status.lastTLSCertFingerprint`.
@@ -212,16 +213,16 @@ CA into the pod by hand.
 
 ```yaml
 spec:
-  topology: Replication          # or Standalone
+  topology: Replication # or Standalone
   tls:
-    enabled: true                # local pods need their own cert/key for outbound tls-replication
+    enabled: true # local pods need their own cert/key for outbound tls-replication
   replicateFrom:
     host: src-primary.dc2.example.svc.cluster.local
     port: 6380
     tls: true
     passwordSecret: { name: source-pass }
-    caSecret:                    # ← S4: CA bundle of the source cluster
-      name: source-ca            #   Secret in the same namespace (key defaults to ca.crt)
+    caSecret: # ← S4: CA bundle of the source cluster
+      name: source-ca #   Secret in the same namespace (key defaults to ca.crt)
 ```
 
 Preparing the Secret with the source CA (copy ca.crt from the source
@@ -260,6 +261,7 @@ kubectl -n <ns> exec <cluster>-0 -- valkey-cli -a "$PW" --no-auth-warning \
 > source's logs, `tlsv1 alert unknown ca` on the target,
 > `master_link_status:down`). Therefore **the source must also trust the
 > target's CA**:
+>
 > - the simplest option — a shared root CA for the client certificates of
 >   both clusters; or
 > - add the target's CA to the source cluster's `ca.crt` (on the source
@@ -279,6 +281,7 @@ kubectl -n <ns> exec <cluster>-0 -- valkey-cli -a "$PW" --no-auth-warning \
 ## Connecting a client
 
 Service DNS:
+
 - `<cluster>.<ns>.svc.cluster.local:6379` (or `:6380` for TLS). This cluster-wide
   Service load-balances across the primary AND its replicas, so use it for reads
   or cluster-aware clients, not for writes to a Replication primary.
@@ -319,6 +322,7 @@ kubectl -n <ns> patch valkeycluster <cluster> --type=merge \
 ```
 
 Sequence:
+
 1. The StatefulSet grows to `shards*(1+replicasPerShard)` pods.
 2. Once all are Ready, the operator creates a `<cluster>-scaleup` Job that
    calls `valkey-cli --cluster add-node` for each new ordinal.
@@ -350,12 +354,13 @@ kubectl -n <ns> patch valkeycluster <cluster> --type=merge \
 ```
 
 Sequence:
+
 1. `statefulSetReplicas()` holds the STS at the old size — the operator
    does not let the StatefulSet delete pods that still own slots.
 2. A `<cluster>-scaledown` Job is created:
    - Finds the `primaryNodeID` for each leaving pod.
    - `valkey-cli --cluster reshard --cluster-from <leaving> --cluster-to
-     <remaining> --cluster-slots 16384 --cluster-yes` (no-op for an
+<remaining> --cluster-slots 16384 --cluster-yes` (no-op for an
      already-empty shard).
    - `valkey-cli --cluster del-node` for each leaving ordinal.
 3. On success: `Status.LastAppliedReplicas` decreases, the StatefulSet
@@ -481,6 +486,7 @@ kubectl -n <ns> patch valkeycluster <cluster> --type=merge \
 ```
 
 Sequence:
+
 1. The reconcile renders a new `valkey.conf` and updates the ConfigMap.
 2. `configHashFromData` returns a new sha256.
 3. The pod template gets the new value of the
@@ -663,6 +669,7 @@ spec:
 ```
 
 Behavior:
+
 - The init container fires on every pod start but exits immediately if
   `/data/dump.rdb` already exists. So for ordinary restarts it's a no-op;
   only the very first start of an empty PVC downloads the object.
@@ -686,6 +693,7 @@ kubectl -n <ns> scale sts/<cluster> --replicas=3
 ```
 
 <a id="cluster-restore"></a>
+
 ### Cluster restore (per-shard)
 
 Cluster restore is **partially automated**: the operator lays out the
@@ -704,14 +712,16 @@ order). A Cluster backup writes files like
 ```yaml
 spec:
   topology: Cluster
-  shards: 6            # == number of shards in the snapshot
+  shards: 6 # == number of shards in the snapshot
   replicasPerShard: 1
   restoreFrom:
     sourceKey: backups/web-20260528-030000-shard-{shard}.rdb
-    s3: { bucket: my-backups, region: us-east-1, credentialsSecret: web-s3-creds }
+    s3:
+      { bucket: my-backups, region: us-east-1, credentialsSecret: web-s3-creds }
 ```
 
 What the operator does automatically:
+
 - restore-init on pod-`i` (i < shards, i.e. a master) downloads
   `…-shard-i.rdb` → `/data/dump.rdb`; replicas (i ≥ shards) skip the
   download (they'll sync from the master after assembly);
@@ -780,6 +790,7 @@ Reason hints at the cause (see Troubleshooting below). General recovery
 procedure:
 
 1. **Diagnose — understand why it failed before doing anything:**
+
    ```sh
    kubectl -n <ns> get valkeycluster <cluster> -o jsonpath='{.status.phase}{" / "}{.status.conditions}'
    kubectl -n <ns> get jobs -l app.kubernetes.io/instance=<cluster>
@@ -790,12 +801,14 @@ procedure:
    Job is idempotent on `status.clusterInitialized`, but a Failed Job
    blocks it. After fixing the cause (DNS/NetworkPolicy/TLS/too few nodes —
    see Troubleshooting):
+
    ```sh
    # delete the failed Job — the operator recreates it on the next reconcile
    kubectl -n <ns> delete job <cluster>-bootstrap
    # nudge the reconcile (optional): touch a harmless annotation
    kubectl -n <ns> annotate valkeycluster <cluster> valkey.wellcake.io/kick="$(date +%s)" --overwrite
    ```
+
    `clusterInitialized` is still `false` → the operator sees all pods Ready
    and runs the bootstrap again. No data is lost (the RDB/AOF on the PVCs is
    preserved).
@@ -810,13 +823,36 @@ procedure:
    intervention): `clusterInitialized` is the source of truth for "don't
    run --cluster create again". Do NOT reset it on a running cluster (it
    leads to a re-initialization attempt; on non-empty nodes `--cluster
-   create` will fail — no loss, but BootstrapFailed). For cluster-restore
+create` will fail — no loss, but BootstrapFailed). For cluster-restore
    the behavior is special — see [Cluster restore](#cluster-restore).
 
 5. **PVCs survive a CR delete** (the operator doesn't touch them). A full
    from-scratch re-initialization = delete the CR, then `kubectl -n <ns>
-   delete pvc -l app.kubernetes.io/instance=<cluster>`, then recreate the
+delete pvc -l app.kubernetes.io/instance=<cluster>`, then recreate the
    CR. **Only with deliberate data loss.**
+
+### A cluster stuck after turning auth off (#108)
+
+Up to 0.14.1, `spec.auth.enabled: false` was accepted for a running cluster
+with replicas. The pods kept `requirepass`, the rollout never finished, and
+turning auth back on was rejected. Newer versions reject the change itself.
+A cluster already in that state is recovered by recreating the CR with auth
+on, without deleting the pods:
+
+1. Upgrade the operator, so the CRD and the operator are current.
+2. Save the CR: `kubectl -n <ns> get vk <cluster> -o yaml > vk.yaml`. In the
+   file, set `spec.auth.enabled: true` and drop `status`, `resourceVersion`,
+   `uid`, `creationTimestamp`, `generation` and `managedFields`.
+3. Delete the CR and keep everything it owns:
+   `kubectl -n <ns> delete vk <cluster> --cascade=orphan`.
+4. `kubectl apply -f vk.yaml`. The operator picks up the StatefulSets and the
+   `<cluster>-auth` Secret, so the password does not change.
+
+The pods only restart if the new operator version changed their template.
+The objects kept in step 3 lose their owner reference and the new CR does not
+set it again, so a later delete of the CR leaves them behind. Clean them up
+by label: `kubectl -n <ns> delete sts,svc,cm,secret,pdb -l
+app.kubernetes.io/instance=<cluster>`.
 
 ### Upgrading the operator (Op3)
 
@@ -842,6 +878,7 @@ upgraded:
   `crds/`): those CRDs carry no Helm ownership metadata, so the first upgrade
   fails with `invalid ownership metadata`. Adopt them once, then upgrade as
   usual:
+
   ```sh
   for crd in valkeyclusters.cache.wellcake.io valkeyacls.cache.wellcake.io; do
     kubectl label crd "$crd" app.kubernetes.io/managed-by=Helm --overwrite
@@ -850,12 +887,14 @@ upgraded:
       meta.helm.sh/release-namespace=<namespace> --overwrite
   done
   ```
+
   This only relabels existing objects — nothing is deleted, so stored custom
   resources are untouched.
 
   As of the v1beta1 CRD it became multi-version (v1alpha1 served + v1beta1
   stored); old v1alpha1 objects are read and written transparently
   (strategy `None`, the schemas are still identical — see ROADMAP E1).
+
 - **Leader election.** With >1 controller replica, an upgrade is a rolling
   Deployment; the new leader is acquired via the lease, and the data plane
   does not depend on this window.
@@ -907,6 +946,7 @@ kubectl -n <ns> logs job/<cluster>-bootstrap
 ```
 
 Common causes:
+
 - The pods weren't reachable yet when the bootstrap started. The pre-flight
   loop should prevent this; if you see it — check NetworkPolicy / DNS.
 - TLS is misconfigured. The bootstrap uses `--insecure` in the TLS variant;
@@ -961,11 +1001,11 @@ The operator itself exposes its controller-runtime metrics on a Service
 created by the Helm chart (`valkey-operator-metrics:8443`). Plus custom
 ones:
 
-| Metric | Type | Description |
-| ------ | ---- | ----------- |
-| `valkey_operator_reconcile_total{controller,namespace,name,result}` | counter | Reconciles by controller and result. |
-| `valkey_operator_failover_total{namespace,cluster,kind}` | counter | Operator-driven failover on Replication. kind: `promotion` / `adoption`. |
-| `valkey_operator_cluster_bootstrap_total{namespace,cluster,result}` | counter | Bootstrap Job outcomes. |
-| `valkey_operator_cluster_scale_total{namespace,cluster,direction,result}` | counter | Scale Job outcomes (`up`/`down`). |
-| `valkey_operator_cluster_shards{namespace,cluster,health}` | gauge | Number of shards by health. |
-| `valkey_operator_acl_apply_total{namespace,acl,result}` | counter | ValkeyACL applications. |
+| Metric                                                                    | Type    | Description                                                              |
+| ------------------------------------------------------------------------- | ------- | ------------------------------------------------------------------------ |
+| `valkey_operator_reconcile_total{controller,namespace,name,result}`       | counter | Reconciles by controller and result.                                     |
+| `valkey_operator_failover_total{namespace,cluster,kind}`                  | counter | Operator-driven failover on Replication. kind: `promotion` / `adoption`. |
+| `valkey_operator_cluster_bootstrap_total{namespace,cluster,result}`       | counter | Bootstrap Job outcomes.                                                  |
+| `valkey_operator_cluster_scale_total{namespace,cluster,direction,result}` | counter | Scale Job outcomes (`up`/`down`).                                        |
+| `valkey_operator_cluster_shards{namespace,cluster,health}`                | gauge   | Number of shards by health.                                              |
+| `valkey_operator_acl_apply_total{namespace,acl,result}`                   | counter | ValkeyACL applications.                                                  |
