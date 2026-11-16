@@ -15,6 +15,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/redis/go-redis/v9"
+	"github.com/redis/go-redis/v9/maintnotifications"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -44,6 +45,10 @@ func dialReplClient(ctx context.Context, host string, port int32, password strin
 		DialTimeout:  timeout,
 		ReadTimeout:  timeout,
 		WriteTimeout: timeout,
+		// Valkey has no CLIENT MAINT_NOTIFICATIONS (a Redis Cloud/Enterprise
+		// feature). go-redis tries it on every RESP3 connection by default, which
+		// adds an "unknown subcommand" to errorstat_ERR on each dial.
+		MaintNotificationsConfig: &maintnotifications.Config{Mode: maintnotifications.ModeDisabled},
 	}
 	if useTLS {
 		// We trust the cert-manager-issued certificate chain via the cluster's CA;

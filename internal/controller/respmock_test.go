@@ -32,6 +32,7 @@ type respMock struct {
 	clusterNodes     string
 	sentinelMaster   []string   // flat field/value reply to SENTINEL MASTER
 	sentinelReplicas [][]string // one flat field/value list per replica, for SENTINEL REPLICAS
+	resp3            bool       // answer HELLO 3 like Valkey instead of forcing a RESP2 fallback
 
 	mu       sync.Mutex
 	commands [][]string
@@ -119,6 +120,10 @@ func (m *respMock) handle(conn net.Conn) {
 
 		switch strings.ToUpper(args[0]) {
 		case "HELLO":
+			if m.resp3 {
+				_, _ = io.WriteString(conn, "%3\r\n$6\r\nserver\r\n$6\r\nvalkey\r\n$5\r\nproto\r\n:3\r\n$4\r\nrole\r\n$6\r\nmaster\r\n")
+				continue
+			}
 			// Force a RESP2 fallback: go-redis tolerates a HELLO error and
 			// continues on RESP2, which keeps this mock tiny.
 			_, _ = io.WriteString(conn, "-ERR unknown command 'HELLO'\r\n")
@@ -222,6 +227,28 @@ func TestReplClientInfoParsing(t *testing.T) {
 	}
 	if info["role"] != "slave" || info["master_link_status"] != "up" || info["slave_repl_offset"] != "12345" {
 		t.Errorf("parsed INFO replication = %v", info)
+	}
+}
+
+// Valkey has no CLIENT MAINT_NOTIFICATIONS: go-redis must not send it on a RESP3
+// connection, or every dial adds an "unknown subcommand" to the server's
+// errorstat_ERR.
+func TestDialReplClientSkipsMaintNotifications(t *testing.T) {
+	m := newRespMock(t)
+	m.resp3 = true
+	host, port := m.hostPort(t)
+
+	c := dialReplClient(context.Background(), host, port, "", false, nil, 2*time.Second)
+	if c == nil {
+		t.Fatal("dialReplClient returned nil (ping failed against mock)")
+	}
+	defer c.close()
+
+	if m.recorded("HELLO 3") == nil {
+		t.Fatalf("HELLO 3 not issued, the test no longer covers RESP3; recorded: %v", m.commandHeads())
+	}
+	if got := m.recorded("CLIENT MAINT_NOTIFICATIONS"); got != nil {
+		t.Errorf("CLIENT MAINT_NOTIFICATIONS issued: %v", got)
 	}
 }
 

@@ -35,6 +35,11 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   restarted replica would come up without `masterauth` against a primary that
   still requires it. Create a new cluster without auth instead. Standalone
   clusters can still turn auth on and off.
+- The operator no longer adds an error to the Valkey pods' `errorstat_ERR`
+  each time it connects (every minute per pod on a healthy Sentinel cluster).
+  go-redis sent `CLIENT MAINT_NOTIFICATIONS`, a Redis Cloud feature, on each
+  RESP3 connection, and Valkey answered "unknown subcommand". The operator now
+  turns it off.
 
 ## [0.14.1]
 
