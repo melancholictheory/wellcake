@@ -36,7 +36,7 @@ func runSentinelInit(t *testing.T, vc *cachev1beta1.ValkeyCluster, hostname, old
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(cfg, sentinelConfigName), []byte(renderSentinelConf(vc, "")), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(cfg, sentinelConfigName), []byte(renderSentinelConf(vc)), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if oldRuntime != "" {

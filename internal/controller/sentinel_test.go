@@ -23,7 +23,7 @@ import (
 // Unset timings keep the previously hard-coded values, so the Sentinel
 // ConfigMap of existing clusters is unchanged by an operator upgrade.
 func TestRenderSentinelConfTimings(t *testing.T) {
-	def := renderSentinelConf(sentinelCR(), "")
+	def := renderSentinelConf(sentinelCR())
 	for _, want := range []string{
 		"sentinel down-after-milliseconds mymaster 5000\n",
 		"sentinel failover-timeout mymaster 60000\n",
@@ -36,7 +36,7 @@ func TestRenderSentinelConfTimings(t *testing.T) {
 	vc := sentinelCR()
 	vc.Spec.Sentinel.DownAfterMilliseconds = 2000
 	vc.Spec.Sentinel.FailoverTimeout = 20000
-	custom := renderSentinelConf(vc, "")
+	custom := renderSentinelConf(vc)
 	for _, want := range []string{
 		"sentinel down-after-milliseconds mymaster 2000\n",
 		"sentinel failover-timeout mymaster 20000\n",

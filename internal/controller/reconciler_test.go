@@ -187,7 +187,7 @@ func TestReconcileReplicationCreatesOwnedObjects(t *testing.T) {
 
 	// ConfigMap.
 	var cm corev1.ConfigMap
-	if err := c.Get(context.Background(), types.NamespacedName{Name: "rcache-config", Namespace: "ns"}, &cm); err != nil {
+	if err := c.Get(context.Background(), types.NamespacedName{Name: configMapName(vc), Namespace: "ns"}, &cm); err != nil {
 		t.Fatalf("configmap: %v", err)
 	}
 	if _, ok := cm.Data["valkey.conf"]; !ok {

@@ -172,7 +172,7 @@ func internalEndpoint(vc *cachev1beta1.ValkeyCluster) string {
 func statefulSetName(vc *cachev1beta1.ValkeyCluster) string { return vc.Name }
 
 func configMapName(vc *cachev1beta1.ValkeyCluster) string {
-	return fmt.Sprintf("%s-config", vc.Name)
+	return vc.Name + "-config-v2"
 }
 
 func passwordSecretName(vc *cachev1beta1.ValkeyCluster) string {
@@ -201,9 +201,6 @@ func tlsSecretName(vc *cachev1beta1.ValkeyCluster) string {
 
 // configHashFromData returns a deterministic short hash of a ConfigMap.Data map,
 // used to roll the StatefulSet pods whenever valkey.conf or entrypoint.sh changes.
-// The rendered valkey.conf carries requirepass, so the auth password DOES affect
-// this hash: a rotated existingSecret re-renders the config and rolls the pods
-// (the auth.existingSecret watch + the init-script ACL re-seed apply the change).
 func configHashFromData(data map[string]string) string {
 	keys := make([]string, 0, len(data))
 	for k := range data {
@@ -390,7 +387,7 @@ func buildReplicasService(vc *cachev1beta1.ValkeyCluster) *corev1.Service {
 	return buildRoleService(vc, replicasServiceName(vc), roleReplica)
 }
 
-func buildConfigMap(vc *cachev1beta1.ValkeyCluster, password string) *corev1.ConfigMap {
+func buildConfigMap(vc *cachev1beta1.ValkeyCluster) *corev1.ConfigMap {
 	return &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      configMapName(vc),
@@ -398,7 +395,7 @@ func buildConfigMap(vc *cachev1beta1.ValkeyCluster, password string) *corev1.Con
 			Labels:    labelsFor(vc),
 		},
 		Data: map[string]string{
-			valkeyConfFile: renderValkeyConf(vc, password),
+			valkeyConfFile: renderValkeyConf(vc),
 		},
 	}
 }
@@ -441,7 +438,7 @@ func valkeyImageAtLeast(image string, maj, min int) bool {
 	return gotMin >= min
 }
 
-func renderValkeyConf(vc *cachev1beta1.ValkeyCluster, password string) string {
+func renderValkeyConf(vc *cachev1beta1.ValkeyCluster) string {
 	var b strings.Builder
 	if tlsEnabled(vc) {
 		fmt.Fprintf(&b, "port 0\n")
@@ -471,7 +468,7 @@ func renderValkeyConf(vc *cachev1beta1.ValkeyCluster, password string) string {
 	fmt.Fprintf(&b, "bind 0.0.0.0\n")
 	fmt.Fprintf(&b, "protected-mode no\n")
 	fmt.Fprintf(&b, "dir %s\n", dataMountPath)
-	renderAuthConfig(&b, vc, password)
+	renderReplicationAuth(&b, vc)
 
 	// Persist ACL state on the data PVC so users survive pod restarts.
 	// `ACL SAVE` (called by ValkeyACLReconciler) writes here; Valkey loads
@@ -748,14 +745,18 @@ func renderInitScript(vc *cachev1beta1.ValkeyCluster) string {
 	// (default, plus the Sentinel and replication users) carry the password as a
 	// SHA-256 hash here.
 	// When the password changes (e.g. a rotated auth.existingSecret, which
-	// re-renders requirepass and rolls the pods) the seeded hash no longer matches,
+	// triggers a rollout) the seeded hash no longer matches,
 	// so we rewrite ONLY the operator-managed user lines and preserve any other
 	// users an `ACL SAVE` persisted (the ValkeyACL CRD). The init runs locally in
 	// the pod, so no live authentication (and thus no knowledge of the old
 	// password) is needed.
 	common := fmt.Sprintf(`set -eu
-cp %[1]s/valkey.conf %[2]s/runtime.conf
+umask 077
+%[6]scp %[1]s/valkey.conf %[2]s/runtime.conf
+chmod 600 %[2]s/runtime.conf
 if [ -n "${VALKEY_PASSWORD:-}" ]; then
+  PASSWORD_ARG=$(printf '%%s' "$VALKEY_PASSWORD" | valkey_config_arg)
+  printf 'requirepass %%s\nmasterauth %%s\n' "$PASSWORD_ARG" "$PASSWORD_ARG" >> %[2]s/runtime.conf
   PW_HASH=$(printf '%%s' "$VALKEY_PASSWORD" | sha256sum | awk '{print $1}')
   if [ ! -s %[2]s/users.acl ]; then
     echo "user default on #$PW_HASH ~* &* +@all" > %[2]s/users.acl
@@ -770,20 +771,8 @@ elif grep -qE "^user (default|%[5]s) " %[2]s/users.acl; then
   grep -vE "^user (default|%[5]s) " %[2]s/users.acl > %[2]s/users.acl.new || true
   mv %[2]s/users.acl.new %[2]s/users.acl
 fi
-# Unlike valkeyConfigArg, this only escapes for double-quoted config values.
-valkey_config_arg() {
-  awk '
-    BEGIN { printf "\"" }
-    {
-      if (NR > 1) printf "\\n"
-      gsub(/\\/, "\\\\")
-      gsub(/"/, "\\\"")
-      printf "%%s", $0
-    }
-    END { printf "\"\n" }
-  '
-}
-	`, configMountPath, dataMountPath, managedSeed, managedReseed, managedUsersRe)
+%[7]s
+	`, configMountPath, dataMountPath, managedSeed, managedReseed, managedUsersRe, shellConfigArg, exporterACLInit(vc))
 
 	// Multi-region: every pod (including pod-0) replicates from an external
 	// primary. Local primary/replica entrypoint logic is bypassed.
@@ -1218,6 +1207,10 @@ func buildStatefulSet(vc *cachev1beta1.ValkeyCluster, configHash string, proacti
 		})
 	}
 
+	if vc.Spec.AuthEnabled() && metricsEnabled(vc) {
+		configInitEnv = append(configInitEnv, exporterPasswordEnv(vc))
+	}
+
 	containerPorts := []corev1.ContainerPort{{
 		Name:          appValkey,
 		ContainerPort: port,
@@ -1279,8 +1272,15 @@ func buildStatefulSet(vc *cachev1beta1.ValkeyCluster, configHash string, proacti
 			ValueFrom: secretRef(authSecretName(vc), secretKeyPassword),
 		})
 	}
-	if sentinelPrimaryGuardActive(vc) {
-		valkeyCommand = []string{shellCmd, "-c", renderSentinelPrimaryGuard(vc)}
+	if sentinelPrimaryGuardActive(vc) || vc.Spec.AuthEnabled() {
+		start := "exec valkey-server " + dataMountPath + "/runtime.conf"
+		if sentinelPrimaryGuardActive(vc) {
+			start = renderSentinelPrimaryGuard(vc)
+		}
+		if vc.Spec.AuthEnabled() {
+			start = refreshRuntimeAuth(false) + start
+		}
+		valkeyCommand = []string{shellCmd, "-c", start}
 		valkeyArgs = nil
 	}
 	valkeyContainer := corev1.Container{
@@ -1758,24 +1758,12 @@ func exporterContainer(vc *cachev1beta1.ValkeyCluster, port int32, portName stri
 		env = append(env, corev1.EnvVar{Name: "REDIS_EXPORTER_SKIP_TLS_VERIFICATION", Value: valueTrue})
 	}
 	if vc.Spec.AuthEnabled() {
-		// Honor a user-supplied auth Secret: when auth.existingSecret is set the
-		// operator never creates <name>-auth, so referencing it here leaves the
-		// exporter container unable to start ("secret not found") — and since
-		// it's a sidecar, the whole pod never becomes Ready. (Same handling as
-		// the backup CronJob.)
-		secretName := passwordSecretName(vc)
-		if vc.Spec.Auth.ExistingSecret != "" {
-			secretName = vc.Spec.Auth.ExistingSecret
-		}
-		env = append(env, corev1.EnvVar{
-			Name: "REDIS_PASSWORD",
-			ValueFrom: &corev1.EnvVarSource{
-				SecretKeyRef: &corev1.SecretKeySelector{
-					LocalObjectReference: corev1.LocalObjectReference{Name: secretName},
-					Key:                  secretKeyPassword,
-				},
-			},
-		})
+		env = append(env,
+			// CONFIG GET can return credentials, including requirepass.
+			corev1.EnvVar{Name: "REDIS_EXPORTER_CONFIG_COMMAND", Value: "-"},
+			corev1.EnvVar{Name: "REDIS_USER", Value: exporterACLUser},
+			corev1.EnvVar{Name: "REDIS_PASSWORD", ValueFrom: secretRef(exporterSecretName(vc), secretKeyPassword)},
+		)
 	}
 	return corev1.Container{
 		Name:            metricsPortName,
@@ -1923,10 +1911,10 @@ func topologyReplicates(vc *cachev1beta1.ValkeyCluster) bool {
 }
 
 // isReservedACLUser reports whether an ACL user is operator-managed (the default
-// user plus the dedicated Sentinel and replication identities) and so must never
+// user plus the dedicated Sentinel, replication and exporter identities) and so must never
 // be dropped by the ValkeyACL reconciler. The webhook rejects the same names.
 func isReservedACLUser(name string) bool {
-	return name == "default" || name == sentinelACLUser || name == replicationACLUser
+	return name == "default" || name == sentinelACLUser || name == replicationACLUser || name == exporterACLUser
 }
 
 // managedACLUser is an operator-seeded non-default ACL user plus the ACL rules
@@ -1951,20 +1939,9 @@ func managedNonDefaultUsers(vc *cachev1beta1.ValkeyCluster) []managedACLUser {
 	return users
 }
 
-// renderAuthConfig writes the auth directives into valkey.conf. Replicas
-// authenticate to their primary as the dedicated, least-privilege replication
-// user (seeded in users.acl by renderInitScript) rather than the full-access
-// default user; only replicating topologies need it, and the operator's own
-// control connections keep using the default user.
-func renderAuthConfig(b *strings.Builder, vc *cachev1beta1.ValkeyCluster, password string) {
-	if password == "" {
-		return
-	}
-	quotedPassword := valkeyConfigArg(password)
-	fmt.Fprintf(b, "requirepass %s\n", quotedPassword)
-	fmt.Fprintf(b, "masterauth %s\n", quotedPassword)
-	if topologyReplicates(vc) {
-		fmt.Fprintf(b, "masteruser %s\n", replicationACLUser)
+func renderReplicationAuth(config *strings.Builder, vc *cachev1beta1.ValkeyCluster) {
+	if vc.Spec.AuthEnabled() && topologyReplicates(vc) {
+		fmt.Fprintf(config, "masteruser %s\n", replicationACLUser)
 	}
 }
 

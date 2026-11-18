@@ -33,7 +33,7 @@ ROADMAP T7.
 - `TestRenderValkeyConfHasProfileDefaults`, `TestRenderValkeyConfMutualTLS`, `TestRenderValkeyConfClusterDirectives`, `TestRenderValkeyConfReplBacklog` — rendering `valkey.conf`: profiles, mTLS, cluster directives, auto-sized repl-backlog.
 - `TestRenderInitScriptSeedsDefaultUserACL`, `TestRenderInitScriptNoPasswordLeavesACLEmpty` — the init script seeds the default user's ACL only when a password is present.
 - `TestInternalEndpoint` — host:port of the client Service in the status.
-- `TestBuildExporterTLS`, `TestBuildExporterAuthSecret` — the redis_exporter sidecar: TLS skip-verify and `auth.existingSecret`.
+- `TestBuildExporterTLS`, `TestBuildExporterAuthSecret` — the redis_exporter sidecar TLS settings and dedicated credentials for both auth modes.
 - `TestBuildHeadlessServiceHasGossipPortOnlyForCluster` — gossip port only for Cluster.
 - `TestBuildStatefulSetInitContainerCount`, `TestBuildStatefulSetPropagatesRestartToken` — init containers and propagation of the restart token into the pod template.
 - `TestParseClusterNodes`, `TestSlotsCountHandlesRangesAndSingles`, `TestSummarizeShards` — parsing `CLUSTER NODES`, counting slots, summarizing shards.

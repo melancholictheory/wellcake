@@ -224,7 +224,7 @@ func (r *ValkeyClusterReconciler) reconcileSentinel(ctx context.Context, vc *cac
 // renderSentinelConf assembles the sentinel.conf served via ConfigMap. The
 // monitored master starts as pod-0; Sentinel will rewrite this file in place
 // after a failover, so we mount via a directory copy rather than directly.
-func renderSentinelConf(vc *cachev1beta1.ValkeyCluster, password string) string {
+func renderSentinelConf(vc *cachev1beta1.ValkeyCluster) string {
 	quorum := vc.Spec.Sentinel.Quorum
 	if quorum == 0 {
 		quorum = vc.Spec.Sentinel.Replicas/2 + 1
@@ -246,13 +246,8 @@ sentinel announce-hostnames yes
 `, sentinelPort, dataMountPath, sentinelMasterName, primary, port, quorum,
 		sentinelMasterName, sentinelDownAfterMs(vc), sentinelMasterName, sentinelFailoverTimeout(vc), sentinelMasterName)
 
-	if password != "" {
-		// Authenticate to the monitored master as the dedicated least-data-exposure
-		// ACL user (seeded on the data nodes) rather than the default user, and
-		// keep requirepass for client/inter-sentinel auth on the Sentinel port.
-		quotedPassword := valkeyConfigArg(password)
-		conf += fmt.Sprintf("sentinel auth-user %s %s\nsentinel auth-pass %s %s\nrequirepass %s\n",
-			sentinelMasterName, sentinelACLUser, sentinelMasterName, quotedPassword, quotedPassword)
+	if vc.Spec.AuthEnabled() {
+		conf += fmt.Sprintf("sentinel auth-user %s %s\n", sentinelMasterName, sentinelACLUser)
 	}
 	if tlsEnabled(vc) {
 		conf += fmt.Sprintf(`tls-port %d
@@ -280,23 +275,31 @@ func sentinelListenPort(vc *cachev1beta1.ValkeyCluster) int32 {
 func (r *ValkeyClusterReconciler) ensureSentinelConfigMap(ctx context.Context, vc *cachev1beta1.ValkeyCluster, password string) (string, error) {
 	cm := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      vc.Name + "-sentinel-config",
+			Name:      vc.Name + "-sentinel-config-v2",
 			Namespace: vc.Namespace,
 			Labels:    sentinelLabels(vc),
 		},
-		Data: map[string]string{sentinelConfigName: renderSentinelConf(vc, password)},
+		Data: map[string]string{sentinelConfigName: renderSentinelConf(vc)},
 	}
-	hash := sentinelConfigHash(cm.Data[sentinelConfigName], sentinelPasswordRotatesLive(vc))
+	hash := sentinelConfigHash(cm.Data[sentinelConfigName])
+	hash, err := r.authConfigHash(ctx, vc, hash, password, sentinelMetricsEnabled(vc))
+	if err != nil {
+		return "", err
+	}
 	if err := controllerutil.SetControllerReference(vc, cm, r.Scheme); err != nil {
 		return "", err
 	}
 	var existing corev1.ConfigMap
-	err := r.Get(ctx, client.ObjectKeyFromObject(cm), &existing)
+	err = r.Get(ctx, client.ObjectKeyFromObject(cm), &existing)
 	if apierrors.IsNotFound(err) {
 		return hash, r.Create(ctx, cm)
 	}
 	if err != nil {
 		return "", err
+	}
+	if existing.Data[sentinelConfigName] == cm.Data[sentinelConfigName] &&
+		len(existing.Data) == len(cm.Data) && labelsContained(cm.Labels, existing.Labels) {
+		return hash, nil
 	}
 	existing.Data = cm.Data
 	existing.Labels = cm.Labels
@@ -307,16 +310,10 @@ func (r *ValkeyClusterReconciler) ensureSentinelConfigMap(ctx context.Context, v
 // change that only takes effect on restart (auth, TLS, port) rolls the Sentinel
 // pods. The ConfigMap only seeds runtime-sentinel.conf when a pod starts. The
 // timings are left out: applySentinelTimings sets them live with SENTINEL SET.
-// With livePassword, so is the password: the in-place rotation sets it on the
-// running Sentinels, and a Sentinel that restarts reads the new one from the
-// ConfigMap, so a rotation does not restart the Sentinels.
-func sentinelConfigHash(conf string, livePassword bool) string {
+func sentinelConfigHash(conf string) string {
 	var kept []string
 	for line := range strings.SplitSeq(conf, "\n") {
 		if strings.HasPrefix(line, "sentinel down-after-milliseconds ") || strings.HasPrefix(line, "sentinel failover-timeout ") {
-			continue
-		}
-		if livePassword && (strings.HasPrefix(line, "sentinel auth-pass ") || strings.HasPrefix(line, "requirepass ")) {
 			continue
 		}
 		kept = append(kept, line)
@@ -446,7 +443,7 @@ func buildSentinelStatefulSet(vc *cachev1beta1.ValkeyCluster, proactive bool) *a
 			Name: "config",
 			VolumeSource: corev1.VolumeSource{
 				ConfigMap: &corev1.ConfigMapVolumeSource{
-					LocalObjectReference: corev1.LocalObjectReference{Name: vc.Name + "-sentinel-config"},
+					LocalObjectReference: corev1.LocalObjectReference{Name: vc.Name + "-sentinel-config-v2"},
 				},
 			},
 		},
@@ -525,6 +522,12 @@ func buildSentinelStatefulSet(vc *cachev1beta1.ValkeyCluster, proactive bool) *a
 			},
 			VolumeClaimTemplates: []corev1.PersistentVolumeClaim{pvc},
 		},
+	}
+	if vc.Spec.AuthEnabled() {
+		sentinel := &sts.Spec.Template.Spec.Containers[0]
+		sentinel.Command = []string{shellCmd, "-c", refreshRuntimeAuth(true) + "exec valkey-server " + dataMountPath + "/runtime-sentinel.conf --sentinel"}
+		sentinel.Args = nil
+		sentinel.Env = []corev1.EnvVar{{Name: envValkeyPassword, ValueFrom: secretRef(authSecretName(vc), secretKeyPassword)}}
 	}
 	if sentinelMetricsEnabled(vc) {
 		sts.Spec.Template.Spec.Containers = append(sts.Spec.Template.Spec.Containers, buildSentinelExporter(vc))
@@ -679,7 +682,11 @@ func sentinelInitEnv(vc *cachev1beta1.ValkeyCluster) []corev1.EnvVar {
 	if !vc.Spec.AuthEnabled() {
 		return nil
 	}
-	return []corev1.EnvVar{{Name: envValkeyPassword, ValueFrom: secretRef(authSecretName(vc), secretKeyPassword)}}
+	env := []corev1.EnvVar{{Name: envValkeyPassword, ValueFrom: secretRef(authSecretName(vc), secretKeyPassword)}}
+	if sentinelMetricsEnabled(vc) {
+		env = append(env, exporterPasswordEnv(vc))
+	}
+	return env
 }
 
 // renderSentinelInitScript builds runtime-sentinel.conf from the ConfigMap on
@@ -704,6 +711,7 @@ func renderSentinelInitScript(vc *cachev1beta1.ValkeyCluster) string {
 			tlsMountPath, secretKeyTLSCACert, secretKeyTLSCert, secretKeyTLSKey)
 	}
 	return fmt.Sprintf(`set -eu
+umask 077
 RT=%[1]s/runtime-sentinel.conf
 NEW="$RT.new"
 cp /etc/sentinel/%[2]s "$NEW"
@@ -743,9 +751,17 @@ if [ -n "$BEST_HOST" ]; then
   mv "$NEW.m" "$NEW"
   echo "sentinel config-epoch %[7]s $BEST_EPOCH" >> "$NEW"
 fi
+%[8]sif [ -n "${VALKEY_PASSWORD:-}" ]; then
+  PASSWORD_ARG=$(printf '%%s' "$VALKEY_PASSWORD" | valkey_config_arg)
+  printf 'sentinel auth-pass %[7]s %%s\nrequirepass %%s\n' "$PASSWORD_ARG" "$PASSWORD_ARG" >> "$NEW"
+fi
+if [ -n "${EXPORTER_PASSWORD:-}" ]; then
+  PW_HASH=$(printf '%%s' "$EXPORTER_PASSWORD" | sha256sum | awk '{print $1}')
+  printf 'user %[9]s on #%%s %[10]s\n' "$PW_HASH" >> "$NEW"
+fi
 mv "$NEW" "$RT"
 `, dataMountPath, sentinelConfigName, sentinelStatefulSetName(vc),
-		sentinelListenPort(vc), tlsArgs, auth, sentinelMasterName)
+		sentinelListenPort(vc), tlsArgs, auth, sentinelMasterName, shellConfigArg, exporterACLUser, sentinelExporterACLCommands)
 }
 
 // sentinelPodNames lists the Sentinel StatefulSet's pod names. Selectors use
@@ -1034,14 +1050,6 @@ func (c *replClient) sentinelView(ctx context.Context, name string, scaledDown f
 	return v, nil
 }
 
-// sentinelPasswordRotatesLive reports whether the Sentinels' password changes
-// only through the in-place rotation (an operator-managed Secret). A
-// user-managed existingSecret is never rotated live, so a change to it still
-// has to roll the Sentinels.
-func sentinelPasswordRotatesLive(vc *cachev1beta1.ValkeyCluster) bool {
-	return vc.Spec.Auth == nil || vc.Spec.Auth.ExistingSecret == ""
-}
-
 // rotateSentinelPassword moves every Sentinel of the cluster from oldPw to
 // newPw, in one of three steps run around the data pods' own passes:
 //   - "add": the Sentinels accept both passwords (ACL SETUSER default >new);
@@ -1051,7 +1059,7 @@ func sentinelPasswordRotatesLive(vc *cachev1beta1.ValkeyCluster) bool {
 //
 // Sentinel has no CONFIG SET, so requirepass itself cannot change live; the
 // ACL rule is what a client is checked against. A Sentinel that restarts
-// later reads the new requirepass from the ConfigMap.
+// later reads the new requirepass from the Secret.
 func (r *ValkeyClusterReconciler) rotateSentinelPassword(ctx context.Context, vc *cachev1beta1.ValkeyCluster, oldPw, newPw, step string) error {
 	if vc.Spec.Topology != cachev1beta1.TopologySentinel || vc.Spec.Sentinel == nil {
 		return nil
