@@ -115,6 +115,10 @@ func (r *ValkeyClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	// here unset. Default() is idempotent.
 	vc.Default()
 
+	if err := r.cleanLegacyAuthConfig(ctx, &vc); err != nil {
+		return ctrl.Result{}, fmt.Errorf("clean legacy ConfigMap: %w", err)
+	}
+
 	// Hibernation: scale the StatefulSet to zero (keeping PVCs) and stop active
 	// management. A single short path for every topology — no bootstrap, survey
 	// or failover while asleep.
@@ -366,7 +370,7 @@ func (r *ValkeyClusterReconciler) ensurePasswordSecret(ctx context.Context, vc *
 		return "", err
 	}
 
-	pw, err := generatePassword(32)
+	pw, err := generatePassword()
 	if err != nil {
 		return "", err
 	}
@@ -462,13 +466,16 @@ func (r *ValkeyClusterReconciler) applyService(ctx context.Context, desired *cor
 // final Data, which the StatefulSet uses as a pod template annotation so that
 // pods roll whenever valkey.conf or entrypoint.sh changes.
 func (r *ValkeyClusterReconciler) ensureConfigMap(ctx context.Context, vc *cachev1beta1.ValkeyCluster, password string) (string, error) {
-	desired := buildConfigMap(vc, password)
+	desired := buildConfigMap(vc)
 	if err := controllerutil.SetControllerReference(vc, desired, r.Scheme); err != nil {
 		return "", err
 	}
-	hash := configHashFromData(desired.Data)
+	hash, err := r.authConfigHash(ctx, vc, configHashFromData(desired.Data), password, true)
+	if err != nil {
+		return "", err
+	}
 	var existing corev1.ConfigMap
-	err := r.Get(ctx, client.ObjectKeyFromObject(desired), &existing)
+	err = r.Get(ctx, client.ObjectKeyFromObject(desired), &existing)
 	if apierrors.IsNotFound(err) {
 		if err := r.Create(ctx, desired); err != nil {
 			return "", err

@@ -174,10 +174,9 @@ kubectl -n <ns> annotate valkeycluster <cluster> \
 The operator generates a new password, rolls it out to the live instances
 (a live `ACL SETUSER` on the `default` user + `masterauth`, with no
 replication blip; in the Sentinel topology the Sentinels take it live too)
-and rewrites `<cluster>-auth`. The data pods then roll once, one at a time,
-so the metrics exporter and the init scripts pick up the new Secret; the
-Sentinels do not restart. The action is idempotent
-by token — a repeat reconcile with the same annotation value does nothing.
+and rewrites `<cluster>-auth`. The data and Sentinel pods keep running. Readiness probes and
+exporters continue using the separate `<cluster>-internal-auth-<id>` Secret.
+Use a new token for each rotation.
 Verify that the operator processed the rotation:
 
 ```sh
@@ -192,9 +191,9 @@ Secret.
 
 **Limitation:** for a **user-managed** Secret (`auth.existingSecret` set),
 in-place rotation is not available — the operator does not know the old
-password if the user changes it. There, rotation is the old way: edit the
-source Secret and restart the pods manually
-(`kubectl rollout restart sts/<cluster>`).
+password if the user changes it. Editing the source Secret changes the pod
+template. Plan this change during maintenance for replicated clusters. A
+new replica can fail to authenticate until the primary uses the new password.
 
 ### Reloading the TLS certificate without a restart
 

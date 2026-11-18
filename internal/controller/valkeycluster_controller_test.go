@@ -401,7 +401,7 @@ var _ = Describe("ValkeyCluster reconcile (envtest)", func() {
 		}
 
 		var cm corev1.ConfigMap
-		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "rcache-config", Namespace: ns}, &cm)).To(Succeed())
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: configMapName(vc), Namespace: ns}, &cm)).To(Succeed())
 		Expect(cm.Data).To(HaveKey("valkey.conf"))
 
 		var sec corev1.Secret
@@ -475,7 +475,7 @@ var _ = Describe("ValkeyCluster reconcile (envtest)", func() {
 
 		By("rendering TLS directives into valkey.conf")
 		var cm corev1.ConfigMap
-		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "tcache-config", Namespace: ns}, &cm)).To(Succeed())
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: configMapName(vc), Namespace: ns}, &cm)).To(Succeed())
 		conf := cm.Data["valkey.conf"]
 		for _, want := range []string{
 			"port 0",

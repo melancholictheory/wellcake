@@ -297,12 +297,13 @@ func TestEnsurePDBSkipsNoOpAndSwitchesBudget(t *testing.T) {
 }
 
 // ensureConfigMap returns the pod-rollout hash and must skip a no-op reconcile;
-// a real config change (here a rotated password re-rendering valkey.conf) must
+// a real config change must
 // still write and change the hash. Data is fully operator-owned with no
 // API-server-defaulted keys, so the gate is an exact DeepEqual.
 func TestEnsureConfigMapSkipsNoOpAndUpdatesOnChange(t *testing.T) {
 	scheme := newTestScheme(t)
 	vc := minimalCR()
+	vc.Spec.Auth = &cachev1beta1.AuthSpec{Enabled: new(true)}
 	vc.Namespace, vc.Name, vc.UID = "ns", "vk", types.UID("u1")
 	key := types.NamespacedName{Namespace: "ns", Name: configMapName(vc)}
 
@@ -331,8 +332,13 @@ func TestEnsureConfigMapSkipsNoOpAndUpdatesOnChange(t *testing.T) {
 		t.Fatalf("no-op ensureConfigMap bumped resourceVersion %s->%s (churn)", rv0, rv)
 	}
 
-	// change a config key: a rotated password re-renders valkey.conf → MUST write,
-	// change the hash, and land the new Data.
+	rotated, err := r.ensureConfigMap(context.Background(), vc, "pw-2")
+	if err != nil || rotated != h0 || rvOf(t, c, &corev1.ConfigMap{}, key) != rv0 {
+		t.Fatalf("managed password rotation changed the config: hash %s, error %v", rotated, err)
+	}
+
+	// A real config change writes the ConfigMap and changes the pod hash.
+	vc.Spec.Config = map[string]string{"maxmemory-policy": "volatile-lru"}
 	h2, err := r.ensureConfigMap(context.Background(), vc, "pw-2")
 	if err != nil {
 		t.Fatalf("changed ensureConfigMap: %v", err)
@@ -344,7 +350,7 @@ func TestEnsureConfigMapSkipsNoOpAndUpdatesOnChange(t *testing.T) {
 	if h2 == h0 {
 		t.Fatalf("hash unchanged after config change: %s", h2)
 	}
-	if configHashFromData(got.Data) != h2 {
-		t.Fatalf("live Data does not reflect the change: returned hash %s, live-data hash %s", h2, configHashFromData(got.Data))
+	if got.Data[valkeyConfFile] != renderValkeyConf(vc) {
+		t.Fatal("live ConfigMap did not pick up the new Valkey settings")
 	}
 }

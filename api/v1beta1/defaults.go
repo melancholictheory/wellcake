@@ -57,6 +57,9 @@ func (vc *ValkeyCluster) Default() {
 // to the same default the CRD applies, so callers behave identically whether or
 // not the API server defaulted the object.
 
+// ExporterACLUser is reserved for the operator-managed metrics sidecars.
+const ExporterACLUser = "wellcake-exporter"
+
 // AuthEnabled reports whether password authentication is on. No auth block
 // means off; an auth block without enabled means the CRD default (on).
 func (s *ValkeyClusterSpec) AuthEnabled() bool {
