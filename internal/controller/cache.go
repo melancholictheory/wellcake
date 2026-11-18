@@ -12,6 +12,7 @@ package controller
 
 import (
 	"context"
+	"maps"
 
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
@@ -22,6 +23,8 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	cachev1beta1 "github.com/melancholictheory/wellcake/api/v1beta1"
 )
 
 // ManagedObjectCache restricts list/watch for managed workloads and their
@@ -64,4 +67,32 @@ func (c managedCacheClient) Get(ctx context.Context, key client.ObjectKey, obj c
 	default:
 		return err
 	}
+}
+
+// A disabled resource in an already observed generation is usually absent.
+// Use the filtered cache then. During a spec change, check the API as well so
+// disabling a resource can still delete an older object that lacks its label.
+func (r *ValkeyClusterReconciler) removeOptionalResource(ctx context.Context, vc *cachev1beta1.ValkeyCluster, key client.ObjectKey, obj client.Object) error {
+	reader := client.Reader(r.Client)
+	if cached, ok := r.Client.(managedCacheClient); ok && vc.Status.ObservedGeneration >= vc.Generation {
+		reader = cached.Client
+	}
+	if err := reader.Get(ctx, key, obj); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	return client.IgnoreNotFound(r.Delete(ctx, obj))
+}
+
+func patchManagedLabels(ctx context.Context, c client.Client, obj client.Object, desired map[string]string) error {
+	if labelsContained(desired, obj.GetLabels()) {
+		return nil
+	}
+	before := obj.DeepCopyObject().(client.Object)
+	current := obj.GetLabels()
+	if current == nil {
+		current = make(map[string]string, len(desired))
+	}
+	maps.Copy(current, desired)
+	obj.SetLabels(current)
+	return c.Patch(ctx, obj, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{}))
 }

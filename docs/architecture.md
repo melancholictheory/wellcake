@@ -229,8 +229,8 @@ policies.
 
 The manager watches managed Pods, StatefulSets, Services, ConfigMaps, disruption
 budgets, network policies, Jobs and CronJobs through a label selector. It can
-still look up a managed resource by name when the label is absent, which allows
-the reconciler to repair labels without recreating workloads.
+look up a secondary resource by name when its label is absent, then repair the
+label without rewriting the pod template. Pod reads use the filtered cache.
 
 Secret watches retain metadata so generated Secret changes, certificate
 renewals and external password changes can enqueue the cluster. Typed Secret
