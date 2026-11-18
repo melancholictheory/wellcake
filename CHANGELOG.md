@@ -6,6 +6,17 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `valkey.wellcake.io/rollout-hold: "true"` holds the proactive rollout of a
+  cluster: the StatefulSets get the new pod template, but the operator deletes
+  no further pod and hands no primary over until the annotation is removed. A
+  pod already restarting finishes, and a held cluster reports Ready. A
+  `valkey.wellcake.io/restart` request is held too. An operator upgrade that
+  changes the render (as 0.14.2 did) can then roll the clusters one at a time
+  instead of all at once. Without `proactive-rollout` the StatefulSet
+  controller rolls the pods and the annotation has no effect.
+
 ## [0.14.2]
 
 ### Added

@@ -85,6 +85,12 @@ func (r *ValkeyClusterReconciler) driveSentinelRollout(
 			return true, nil
 		}
 		action := nextRolloutStep(dataPods, dataRev, master)
+		if (action.kind == rolloutRollReplica || action.kind == rolloutPromote) &&
+			holdRolloutStep(ctx, vc, action.pod, dataRev) {
+			// Held before the Sentinel plane too: it only rolls once the data
+			// plane has converged.
+			return false, nil
+		}
 		switch action.kind {
 		case rolloutWait:
 			return true, nil
@@ -133,6 +139,9 @@ func (r *ValkeyClusterReconciler) driveSentinelRollout(
 	// Sentinels have no primary — nextRolloutStep with primary="" only ever
 	// returns roll-replica/wait/none, rolling one stale Sentinel at a time.
 	action := nextRolloutStep(senPods, senRev, "")
+	if action.kind == rolloutRollReplica && holdRolloutStep(ctx, vc, action.pod, senRev) {
+		return false, nil
+	}
 	switch action.kind {
 	case rolloutWait:
 		return true, nil

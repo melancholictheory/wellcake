@@ -538,6 +538,28 @@ kubectl -n <ns> annotate valkeycluster <cluster> valkey.wellcake.io/proactive-ro
 With the valkey-cluster chart, it can be set in the `annotations` value
 instead, next to the rest of the cluster's configuration.
 
+**Holding a proactive rollout.** With `proactive-rollout`, the annotation
+`valkey.wellcake.io/rollout-hold: "true"` stops the operator before its next
+rollout step: it deletes no further pod and hands no primary over, while the
+StatefulSets already carry the new pod template. A pod already restarting
+finishes; the cluster then reports Ready on its current pods. A
+`valkey.wellcake.io/restart` request is held too, since it rolls the pods the
+same way. Remove the annotation (or set it to `false`) to resume the rollout
+where it stopped. While a held cluster has stale pods, the operator logs
+`proactive rollout held` with the next pod to roll. Without
+`proactive-rollout` the annotation has no effect: the StatefulSet controller
+rolls the pods itself.
+
+It is meant for an operator upgrade that changes the render of many
+clusters: annotate them all before the upgrade, then lift the hold one
+cluster at a time.
+
+```sh
+kubectl -n <ns> annotate valkeycluster <cluster> valkey.wellcake.io/rollout-hold=true
+# after the operator upgrade, cluster by cluster:
+kubectl -n <ns> annotate valkeycluster <cluster> valkey.wellcake.io/rollout-hold-
+```
+
 Password rotation needs no manual restart: the operator applies the new
 password live, then the data pods roll once on their own (see "Password
 rotation" above).
@@ -895,7 +917,11 @@ upgraded:
   (config-hash) — for example, a new version changed `valkey.conf`/the init
   script. This is a routine one-pod-at-a-time rolling restart, and the PDB
   protects the quorum. Check the `CHANGELOG` for render changes before
-  upgrading durable clusters.
+  upgrading durable clusters. Each cluster rolls one pod at a time, but
+  clusters roll in parallel. To roll them one at a time, set
+  `valkey.wellcake.io/rollout-hold: "true"` on the clusters with
+  `proactive-rollout` before the upgrade, then remove it cluster by cluster
+  (see "Holding a proactive rollout").
 - **CRDs.** The chart ships CRDs as templates, so `helm upgrade` applies schema
   changes like any other resource — no separate step. They carry
   `helm.sh/resource-policy: keep`, so `helm uninstall` leaves them (and every

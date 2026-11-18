@@ -46,6 +46,27 @@ func proactiveRolloutEnabled(vc *cachev1beta1.ValkeyCluster) bool {
 	return err == nil && v
 }
 
+// rolloutHeld reports whether the cluster carries
+// `valkey.wellcake.io/rollout-hold: "true"`. Only the proactive rollout honours
+// it: without proactive-rollout the StatefulSet controller rolls the pods.
+func rolloutHeld(vc *cachev1beta1.ValkeyCluster) bool {
+	v, err := strconv.ParseBool(vc.Annotations[rolloutHoldAnnotation])
+	return err == nil && v
+}
+
+// holdRolloutStep reports whether the next rollout step (a pod deletion or a
+// handover) must wait for the rollout-hold annotation to be lifted. A held
+// cluster is reported as not rolling, so its status and reactive failover stay
+// those of a steady cluster; a pod already restarting finishes on its own.
+func holdRolloutStep(ctx context.Context, vc *cachev1beta1.ValkeyCluster, pod, revision string) bool {
+	if !rolloutHeld(vc) {
+		return false
+	}
+	logf.FromContext(ctx).Info("proactive rollout held by the "+rolloutHoldAnnotation+" annotation",
+		"name", vc.Name, "nextPod", pod, "revision", revision)
+	return true
+}
+
 type rolloutPod struct {
 	name     string
 	ordinal  int32
@@ -135,6 +156,10 @@ func (r *ValkeyClusterReconciler) driveReplicationRollout(
 	}
 
 	action := nextRolloutStep(pods, desiredRevision, primary)
+	if (action.kind == rolloutRollReplica || action.kind == rolloutPromote) &&
+		holdRolloutStep(ctx, vc, action.pod, desiredRevision) {
+		return primary, false, nil
+	}
 	switch action.kind {
 	case rolloutNone:
 		return primary, false, nil
@@ -391,6 +416,10 @@ func (r *ValkeyClusterReconciler) driveClusterRollout(
 	}
 
 	action := nextClusterRolloutStep(pods, shards, desiredRevision)
+	if action.kind != clusterRolloutNone && action.kind != clusterRolloutWait &&
+		holdRolloutStep(ctx, vc, action.pod, desiredRevision) {
+		return false, nil
+	}
 	switch action.kind {
 	case clusterRolloutNone:
 		return false, nil

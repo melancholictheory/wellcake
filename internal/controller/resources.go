@@ -56,6 +56,11 @@ const (
 	failoverTargetAnnotation = "valkey.wellcake.io/failover-target"
 	rotatePasswordAnnotation = "valkey.wellcake.io/rotate-password"
 	hibernateAnnotation      = "valkey.wellcake.io/hibernate" // "true" → scale to 0, keep PVCs
+	// rolloutHoldAnnotation ("true") keeps the proactive rollout from deleting
+	// any further pod: the StatefulSets get the new template, but the pods stay
+	// on their current revision until the annotation is removed. It lets an
+	// operator upgrade that changes the render roll the clusters one at a time.
+	rolloutHoldAnnotation = "valkey.wellcake.io/rollout-hold"
 	// proactiveRolloutAnnotation opts a single cluster into ADR 0004 proactive
 	// rolling restart ("true" → OnDelete + operator-driven rollout). Per-cluster
 	// (no global flag / CRD change) and consistent with the other opt-in

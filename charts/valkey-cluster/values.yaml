@@ -12,6 +12,7 @@ fullnameOverride: ""
 # float. Example:
 # annotations:
 #   valkey.wellcake.io/proactive-rollout: "true"
+#   valkey.wellcake.io/rollout-hold: "true"
 #   valkey.wellcake.io/restart: "2026-10-28"
 annotations: {}
 
