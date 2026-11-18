@@ -208,8 +208,8 @@ The `valkey.wellcake.io/rotate-password=<token>` annotation rotates the
 operator-managed password once per token. The operator adds the new password
 to the running instances before dropping the old one and persisting ACL state.
 Sentinels switch their upstream and peer credentials during the same operation.
-The data and Sentinel exporters use an independent ACL user from
-`<cluster>-exporter-auth-<id>`, so the cluster password rotation leaves the pod
+Data readiness probes and both exporters use an independent ACL user from
+`<cluster>-internal-auth-<id>`, so the cluster password rotation leaves the pod
 templates unchanged. With `auth.existingSecret`, a change to the referenced
 password changes the hash and rolls both sets of pods.
 

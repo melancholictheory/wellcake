@@ -38,7 +38,7 @@ func TestRefreshRuntimeAuthAfterContainerRestart(t *testing.T) {
 			}
 			for range 2 {
 				cmd := exec.Command("sh", "-c", strings.ReplaceAll(refreshRuntimeAuth(tc.sentinel), dataMountPath, dir))
-				cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "VALKEY_PASSWORD=new", "SOURCE_PASSWORD=remote", "EXPORTER_PASSWORD=metrics"}
+				cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "VALKEY_PASSWORD=new", "SOURCE_PASSWORD=remote", "WELLCAKE_INTERNAL_PASSWORD=metrics"}
 				if out, err := cmd.CombinedOutput(); err != nil {
 					t.Fatalf("refresh runtime auth: %v\n%s", err, out)
 				}

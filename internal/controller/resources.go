@@ -773,7 +773,7 @@ elif grep -qE "^user (default|%[5]s) " %[2]s/users.acl; then
   mv %[2]s/users.acl.new %[2]s/users.acl
 fi
 %[7]s
-	`, configMountPath, dataMountPath, managedSeed, managedReseed, managedUsersRe, shellConfigArg, exporterACLInit(vc))
+	`, configMountPath, dataMountPath, managedSeed, managedReseed, managedUsersRe, shellConfigArg, internalACLInit(vc))
 
 	// Multi-region: every pod (including pod-0) replicates from an external
 	// primary. Local primary/replica entrypoint logic is bypassed.
@@ -1208,8 +1208,8 @@ func buildStatefulSet(vc *cachev1beta1.ValkeyCluster, configHash string, proacti
 		})
 	}
 
-	if vc.Spec.AuthEnabled() && metricsEnabled(vc) {
-		configInitEnv = append(configInitEnv, exporterPasswordEnv(vc))
+	if vc.Spec.AuthEnabled() {
+		configInitEnv = append(configInitEnv, internalAuthPasswordEnv(vc))
 	}
 
 	containerPorts := []corev1.ContainerPort{{
@@ -1265,13 +1265,13 @@ func buildStatefulSet(vc *cachev1beta1.ValkeyCluster, configHash string, proacti
 	valkeyCommand := []string{"valkey-server"}
 	valkeyArgs := []string{dataMountPath + "/runtime.conf"}
 	valkeyEnv := envVars
-	// The readiness probe (and the Sentinel primary guard) talk to the local
-	// server, which asks for the password when auth is on.
+	// The server and Sentinel primary guard need the cluster password at
+	// startup. Readiness uses the independent INFO credential.
 	if vc.Spec.AuthEnabled() {
 		valkeyEnv = append(append([]corev1.EnvVar(nil), envVars...), corev1.EnvVar{
 			Name:      envValkeyPassword,
 			ValueFrom: secretRef(authSecretName(vc), secretKeyPassword),
-		})
+		}, internalAuthPasswordEnv(vc))
 	}
 	if sentinelPrimaryGuardActive(vc) || vc.Spec.AuthEnabled() {
 		start := "exec valkey-server " + dataMountPath + "/runtime.conf"
@@ -1306,8 +1306,6 @@ func buildStatefulSet(vc *cachev1beta1.ValkeyCluster, configHash string, proacti
 		})
 	}
 
-	authVolumes := mountReadinessAuth(vc, &valkeyContainer)
-
 	containers := []corev1.Container{valkeyContainer}
 	if metricsEnabled(vc) {
 		containers = append(containers, buildExporter(vc))
@@ -1327,7 +1325,6 @@ func buildStatefulSet(vc *cachev1beta1.ValkeyCluster, configHash string, proacti
 			},
 		},
 	}
-	volumes = append(volumes, authVolumes...)
 	if tlsEnabled(vc) {
 		volumes = append(volumes, corev1.Volume{
 			Name: tlsVolumeName,
@@ -1766,7 +1763,7 @@ func exporterContainer(vc *cachev1beta1.ValkeyCluster, port int32, portName stri
 			// CONFIG GET can return credentials, including requirepass.
 			corev1.EnvVar{Name: "REDIS_EXPORTER_CONFIG_COMMAND", Value: "-"},
 			corev1.EnvVar{Name: "REDIS_USER", Value: exporterACLUser},
-			corev1.EnvVar{Name: "REDIS_PASSWORD", ValueFrom: secretRef(exporterSecretName(vc), secretKeyPassword)},
+			corev1.EnvVar{Name: "REDIS_PASSWORD", ValueFrom: secretRef(internalAuthSecretName(vc), secretKeyPassword)},
 		)
 	}
 	return corev1.Container{
@@ -1856,10 +1853,10 @@ func dataReadinessProbe(vc *cachev1beta1.ValkeyCluster, port int32) *corev1.Prob
 	}
 	script := ""
 	if vc.Spec.AuthEnabled() {
-		// Read the projection during each probe. The container's startup
-		// environment does not change when the operator rotates the Secret.
-		script = "password=$(cat " + authMountPath + "/" + secretKeyPassword + " && printf .) || exit 1\n" +
-			"export REDISCLI_AUTH=\"${password%.}\"\n"
+		// This credential stays valid even before the kubelet observes a
+		// rotation of the cluster password Secret.
+		script = "export REDISCLI_AUTH=\"$WELLCAKE_INTERNAL_PASSWORD\"\n"
+		cli += " --user " + exporterACLUser
 	}
 	script += "out=$(" + cli + " INFO persistence replication) || exit 1\n" +
 		"out=$(printf '%s\\n' \"$out\" | tr -d '\\r')\n" +

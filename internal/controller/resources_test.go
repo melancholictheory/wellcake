@@ -418,7 +418,7 @@ func runInitScript(t *testing.T, vc *cachev1beta1.ValkeyCluster, dataDir, passwo
 	}
 	script := strings.NewReplacer(configMountPath, cfgDir, dataMountPath, dataDir).Replace(renderInitScript(vc))
 	cmd := exec.Command("sh", "-c", script)
-	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOSTNAME=" + vc.Name + "-1", "POD_NAMESPACE=" + vc.Namespace}
+	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOSTNAME=" + vc.Name + "-1", "POD_NAMESPACE=" + vc.Namespace, "WELLCAKE_INTERNAL_PASSWORD=probe-password"}
 	if password != "" {
 		cmd.Env = append(cmd.Env, "VALKEY_PASSWORD="+password)
 	}
@@ -644,15 +644,15 @@ func TestBuildExporterAuthSecret(t *testing.T) {
 	gen := minimalCR()
 	gen.Spec.Metrics = &cachev1beta1.MetricsSpec{Enabled: true}
 	gen.Spec.Auth = &cachev1beta1.AuthSpec{Enabled: new(true)}
-	if got := passwordSecretRef(buildExporter(gen)); got != exporterSecretName(gen) {
-		t.Errorf("exporter password secret = %q, want %q", got, exporterSecretName(gen))
+	if got := passwordSecretRef(buildExporter(gen)); got != internalAuthSecretName(gen) {
+		t.Errorf("exporter password secret = %q, want %q", got, internalAuthSecretName(gen))
 	}
 
 	ext := minimalCR()
 	ext.Spec.Metrics = &cachev1beta1.MetricsSpec{Enabled: true}
 	ext.Spec.Auth = &cachev1beta1.AuthSpec{Enabled: new(true), ExistingSecret: "my-auth"}
-	if got := passwordSecretRef(buildExporter(ext)); got != exporterSecretName(ext) {
-		t.Errorf("exporter password secret = %q, want %q", got, exporterSecretName(ext))
+	if got := passwordSecretRef(buildExporter(ext)); got != internalAuthSecretName(ext) {
+		t.Errorf("exporter password secret = %q, want %q", got, internalAuthSecretName(ext))
 	}
 }
 

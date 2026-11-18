@@ -478,7 +478,7 @@ func (r *ValkeyClusterReconciler) ensureConfigMap(ctx context.Context, vc *cache
 	if err := controllerutil.SetControllerReference(vc, desired, r.Scheme); err != nil {
 		return "", err
 	}
-	hash, err := r.authConfigHash(ctx, vc, configHashFromData(desired.Data), password, metricsEnabled(vc))
+	hash, err := r.authConfigHash(ctx, vc, configHashFromData(desired.Data), password, true)
 	if err != nil {
 		return "", err
 	}

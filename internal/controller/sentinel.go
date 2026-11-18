@@ -529,7 +529,7 @@ func buildSentinelStatefulSet(vc *cachev1beta1.ValkeyCluster, proactive bool) *a
 		sentinel.Args = nil
 		sentinel.Env = sentinelInitEnv(vc)
 		if sentinelMetricsEnabled(vc) {
-			sentinel.Env = append(sentinel.Env, exporterPasswordEnv(vc))
+			sentinel.Env = append(sentinel.Env, internalAuthPasswordEnv(vc))
 		}
 	}
 	if sentinelMetricsEnabled(vc) {

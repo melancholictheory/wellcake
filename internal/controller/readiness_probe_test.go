@@ -31,22 +31,19 @@ func TestDataReadinessProbe(t *testing.T) {
 		t.Fatalf("readiness probe = %+v, want an exec probe", probe)
 	}
 	cmd := probe.Exec.Command
-	if len(cmd) != 3 || !strings.Contains(cmd[2], "INFO persistence replication") || !strings.Contains(cmd[2], "export REDISCLI_AUTH=") {
+	if len(cmd) != 3 || !strings.Contains(cmd[2], "INFO persistence replication") || !strings.Contains(cmd[2], "export REDISCLI_AUTH=") || !strings.Contains(cmd[2], "--user "+exporterACLUser) {
 		t.Fatalf("readiness command = %q", cmd)
 	}
 
 	run := func(reply string, exit int) bool {
 		t.Helper()
 		bin := t.TempDir()
-		if err := os.WriteFile(filepath.Join(bin, secretKeyPassword), []byte("rotated\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		body := "#!/bin/sh\n[ \"$REDISCLI_AUTH\" = 'rotated\n' ] || exit 1\nprintf '%s' '" + reply + "'\nexit " + string(rune('0'+exit)) + "\n"
+		body := "#!/bin/sh\n[ \"$REDISCLI_AUTH\" = probe-password ] || exit 1\nprintf '%s' '" + reply + "'\nexit " + string(rune('0'+exit)) + "\n"
 		if err := os.WriteFile(filepath.Join(bin, "valkey-cli"), []byte(body), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		c := exec.Command(cmd[0], cmd[1], strings.ReplaceAll(cmd[2], authMountPath, bin))
-		c.Env = []string{"PATH=" + bin + ":" + os.Getenv("PATH"), "VALKEY_PASSWORD=old"}
+		c := exec.Command(cmd[0], cmd[1], cmd[2])
+		c.Env = []string{"PATH=" + bin + ":" + os.Getenv("PATH"), "VALKEY_PASSWORD=old", "WELLCAKE_INTERNAL_PASSWORD=probe-password"}
 		return c.Run() == nil
 	}
 	info := func(loading, sync string) string {

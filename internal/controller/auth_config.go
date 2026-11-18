@@ -25,29 +25,10 @@ import (
 )
 
 const (
-	authVolumeName              = "valkey-auth"
-	authMountPath               = "/var/run/wellcake/auth"
 	exporterACLUser             = cachev1beta1.ExporterACLUser
 	exporterACLCommands         = "+ping +info +client|setname +cluster|info +slowlog|len +slowlog|get +latency|latest +latency|histogram"
 	sentinelExporterACLCommands = "+ping +info +client|setname +sentinel|masters +sentinel|ckquorum +sentinel|sentinels +sentinel|slaves"
 )
-
-// Mount the whole projection so the kubelet can refresh it after rotation.
-func mountReadinessAuth(vc *cachev1beta1.ValkeyCluster, container *corev1.Container) []corev1.Volume {
-	if !vc.Spec.AuthEnabled() {
-		return nil
-	}
-	container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
-		Name: authVolumeName, MountPath: authMountPath, ReadOnly: true,
-	})
-	return []corev1.Volume{{
-		Name: authVolumeName,
-		VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{
-			SecretName: authSecretName(vc),
-			Items:      []corev1.KeyToPath{{Key: secretKeyPassword, Path: secretKeyPassword}},
-		}},
-	}}
-}
 
 // Encode bytes as Valkey's double-quoted hex escapes. This preserves leading,
 // embedded and trailing newlines as well as quotes and backslashes.
@@ -67,8 +48,8 @@ CONF=%[1]s/runtime-sentinel.conf
 awk 'tolower($1) != "requirepass" && !(tolower($1) == "sentinel" && (tolower($2) == "auth-pass" || tolower($2) == "sentinel-pass")) && !(tolower($1) == "user" && $2 == "%[3]s")' "$CONF" > "$CONF.auth"
 PASSWORD_ARG=$(printf '%%s' "$VALKEY_PASSWORD" | valkey_config_arg)
 printf 'sentinel auth-pass %[2]s %%s\nsentinel sentinel-pass %%s\nrequirepass %%s\n' "$PASSWORD_ARG" "$PASSWORD_ARG" "$PASSWORD_ARG" >> "$CONF.auth"
-if [ -n "${EXPORTER_PASSWORD:-}" ]; then
-  EXPORTER_HASH=$(printf '%%s' "$EXPORTER_PASSWORD" | sha256sum | awk '{print $1}')
+if [ -n "${WELLCAKE_INTERNAL_PASSWORD:-}" ]; then
+  EXPORTER_HASH=$(printf '%%s' "$WELLCAKE_INTERNAL_PASSWORD" | sha256sum | awk '{print $1}')
   printf 'user %[3]s on #%%s %[4]s\n' "$EXPORTER_HASH" >> "$CONF.auth"
 fi
 mv "$CONF.auth" "$CONF"
@@ -86,58 +67,62 @@ mv "$CONF.auth" "$CONF"
 `
 }
 
-func exporterSecretName(vc *cachev1beta1.ValkeyCluster) string {
+func internalAuthSecretName(vc *cachev1beta1.ValkeyCluster) string {
 	// Use the CR UID to avoid collisions with a previous cluster that
 	// is still being garbage-collected or a user-managed Secret.
 	suffix := configHashFromData(map[string]string{"uid": string(vc.UID)})
-	return vc.Name + "-exporter-auth-" + suffix
+	return vc.Name + "-internal-auth-" + suffix
 }
 
-func exporterPasswordEnv(vc *cachev1beta1.ValkeyCluster) corev1.EnvVar {
-	return corev1.EnvVar{Name: "EXPORTER_PASSWORD", ValueFrom: secretRef(exporterSecretName(vc), secretKeyPassword)}
+func internalAuthPasswordEnv(vc *cachev1beta1.ValkeyCluster) corev1.EnvVar {
+	return corev1.EnvVar{Name: "WELLCAKE_INTERNAL_PASSWORD", ValueFrom: secretRef(internalAuthSecretName(vc), secretKeyPassword)}
 }
 
-// exporterACLInit changes only the operator's monitoring user on a persisted
-// ACL file. The independently generated password never follows cluster rotation.
-func exporterACLInit(vc *cachev1beta1.ValkeyCluster) string {
-	if !vc.Spec.AuthEnabled() || !metricsEnabled(vc) {
+// internalACLInit reserves a stable INFO credential for readiness. The same
+// user gets the exporter commands when metrics are enabled.
+func internalACLInit(vc *cachev1beta1.ValkeyCluster) string {
+	if !vc.Spec.AuthEnabled() {
 		return fmt.Sprintf(`if grep -q "^user %[1]s " %[2]s/users.acl; then
   grep -v "^user %[1]s " %[2]s/users.acl > %[2]s/users.acl.new || true
   mv %[2]s/users.acl.new %[2]s/users.acl
 fi
 `, exporterACLUser, dataMountPath)
 	}
-	return fmt.Sprintf(`EXPORTER_HASH=$(printf '%%s' "$EXPORTER_PASSWORD" | sha256sum | awk '{print $1}')
+	commands := "+info"
+	if metricsEnabled(vc) {
+		commands = exporterACLCommands
+	}
+	return fmt.Sprintf(`EXPORTER_HASH=$(printf '%%s' "$WELLCAKE_INTERNAL_PASSWORD" | sha256sum | awk '{print $1}')
 grep -v "^user %[1]s " %[2]s/users.acl > %[2]s/users.acl.new || true
 printf 'user %[1]s on #%%s %[3]s\n' "$EXPORTER_HASH" >> %[2]s/users.acl.new
 mv %[2]s/users.acl.new %[2]s/users.acl
-`, exporterACLUser, dataMountPath, exporterACLCommands)
+`, exporterACLUser, dataMountPath, commands)
 }
 
-func (r *ValkeyClusterReconciler) authConfigHash(ctx context.Context, vc *cachev1beta1.ValkeyCluster, configHash, password string, exporter bool) (string, error) {
-	if !vc.Spec.AuthEnabled() || (!exporter && vc.Spec.Auth.ExistingSecret == "") {
+func (r *ValkeyClusterReconciler) authConfigHash(ctx context.Context, vc *cachev1beta1.ValkeyCluster, configHash, password string, internalAuth bool) (string, error) {
+	if !vc.Spec.AuthEnabled() || (!internalAuth && vc.Spec.Auth.ExistingSecret == "") {
 		return configHash, nil
 	}
 	fingerprint := map[string]string{"config": configHash}
 	if vc.Spec.Auth.ExistingSecret != "" {
 		fingerprint["existingSecret"] = password
 	}
-	if exporter {
-		exporterPassword, err := r.ensureExporterSecret(ctx, vc)
+	if internalAuth {
+		internalPassword, err := r.ensureInternalAuthSecret(ctx, vc)
 		if err != nil {
 			return "", err
 		}
-		fingerprint["exporter"] = exporterPassword
+		fingerprint["internalAuth"] = internalPassword
 	}
 	return configHashFromData(fingerprint), nil
 }
 
-func (r *ValkeyClusterReconciler) ensureExporterSecret(ctx context.Context, vc *cachev1beta1.ValkeyCluster) (string, error) {
-	key := client.ObjectKey{Namespace: vc.Namespace, Name: exporterSecretName(vc)}
+func (r *ValkeyClusterReconciler) ensureInternalAuthSecret(ctx context.Context, vc *cachev1beta1.ValkeyCluster) (string, error) {
+	key := client.ObjectKey{Namespace: vc.Namespace, Name: internalAuthSecretName(vc)}
 	var existing corev1.Secret
 	if err := r.Get(ctx, key, &existing); err == nil {
 		if !metav1.IsControlledBy(&existing, vc) {
-			return "", fmt.Errorf("exporter Secret %s has an unexpected owner", key)
+			return "", fmt.Errorf("internal auth Secret %s has an unexpected owner", key)
 		}
 		if password := string(existing.Data[secretKeyPassword]); password != "" {
 			return password, nil

@@ -350,7 +350,7 @@ func TestEnsureConfigMapSkipsNoOpAndUpdatesOnChange(t *testing.T) {
 	if h2 == h0 {
 		t.Fatalf("hash unchanged after config change: %s", h2)
 	}
-	if configHashFromData(got.Data) != h2 {
-		t.Fatalf("live Data does not reflect the change: returned hash %s, live-data hash %s", h2, configHashFromData(got.Data))
+	if got.Data[valkeyConfFile] != renderValkeyConf(vc) {
+		t.Fatal("live ConfigMap did not pick up the new Valkey settings")
 	}
 }
