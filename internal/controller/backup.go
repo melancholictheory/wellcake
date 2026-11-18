@@ -65,7 +65,7 @@ func (r *ValkeyClusterReconciler) ensureBackupCronJob(ctx context.Context, vc *c
 	if err != nil {
 		return err
 	}
-	if existing.Annotations[appliedHashAnnotation] == desiredHash {
+	if existing.Annotations[appliedHashAnnotation] == desiredHash && labelsContained(desired.Labels, existing.Labels) {
 		return nil
 	}
 	existing.Spec = desired.Spec

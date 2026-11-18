@@ -573,7 +573,7 @@ func (r *ValkeyClusterReconciler) applyStatefulSet(ctx context.Context, vc *cach
 		}
 		// Skip the no-op Update when the live STS was last reconciled to the same
 		// desired hash (catches both server-default churn and a shrunk list).
-		if cur.Annotations[appliedHashAnnotation] == desiredHash {
+		if cur.Annotations[appliedHashAnnotation] == desiredHash && labelsContained(desired.Labels, cur.Labels) {
 			existing = cur
 			return nil
 		}
@@ -874,7 +874,7 @@ func (r *ValkeyClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&appsv1.StatefulSet{}).
 		Owns(&corev1.Service{}).
 		Owns(&corev1.ConfigMap{}).
-		Owns(&corev1.Secret{}, builder.MatchEveryOwner).
+		Owns(&corev1.Secret{}, builder.MatchEveryOwner, builder.OnlyMetadata).
 		Owns(&policyv1.PodDisruptionBudget{}).
 		Owns(&networkingv1.NetworkPolicy{}).
 		Owns(&batchv1.Job{}).
@@ -893,7 +893,7 @@ func (r *ValkeyClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		// and an auth.existingSecret (an external password rotation must re-render
 		// the config and roll the pods). Operator-managed Secrets are owned by the
 		// ValkeyCluster and already covered by Owns() above.
-		Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(r.mapSecretToCluster)).
+		Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(r.mapSecretToCluster), builder.OnlyMetadata).
 		Named("valkeycluster").
 		Complete(r)
 }
