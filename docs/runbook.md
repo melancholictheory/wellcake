@@ -39,14 +39,14 @@ kubectl -n valkey-system exec deploy/valkey-operator -- /manager --help
 
 | Flag                                         | Default               | Purpose                                                                                                                                                                        |
 | -------------------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `--metrics-bind-address`                     | `0`                   | Address of the metrics endpoint. `0` — disabled, `:8443` — HTTPS, `:8080` — HTTP. The chart sets it from `metrics.port`, or `0` when `metrics.enabled=false`.                  |
-| `--metrics-secure`                           | `true`                | Serve metrics over HTTPS with an authn/authz filter. `--metrics-secure=false` — plain HTTP.                                                                                    |
+| `--metrics-bind-address`                     | `0`                   | Address of the metrics endpoint. `0` disables it. The chart sets the port from `metrics.port` when `metrics.enabled=true`.                  |
+| `--metrics-secure`                           | `true`                | Serve metrics over HTTPS with a Kubernetes authn/authz filter. The chart sets this flag from `metrics.secure`.                                                                                    |
 | `--health-probe-bind-address`                | `:8081`               | Address of the liveness/readiness probes (`/healthz`, `/readyz`). Chart sets it from `probes.port`.                                                                            |
 | `--leader-elect`                             | `false`               | Leader election: guarantees a single active manager. The chart enables it when `replicaCount > 1`. Lease ID is `1e0a58e3.wellcake.io`.                                         |
 | `--enable-http2`                             | `false`               | HTTP/2 for the metrics/webhook servers. Disabled by default due to a CVE (Rapid Reset).                                                                                        |
 | `--webhook-cert-path`                        | `""`                  | Directory holding the webhook certificate. Empty → controller-runtime generates a self-signed one. The chart mounts the cert-manager secret here when `webhooks.enabled=true`. |
 | `--webhook-cert-name` / `--webhook-cert-key` | `tls.crt` / `tls.key` | File names of the cert/key in the directory above.                                                                                                                             |
-| `--metrics-cert-path`                        | `""`                  | Directory holding the metrics server certificate (for TLS metrics via cert-manager).                                                                                           |
+| `--metrics-cert-path`                        | `""`                  | Directory holding the metrics server certificate. The chart mounts it when `metrics.tlsSecretName` is set.                                                                                           |
 | `--metrics-cert-name` / `--metrics-cert-key` | `tls.crt` / `tls.key` | File names of the cert/key for metrics.                                                                                                                                        |
 
 Logging (zap flags from controller-runtime):
@@ -65,6 +65,34 @@ Logging (zap flags from controller-runtime):
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `ENABLE_WEBHOOKS` | `="false"` disables registration of the validating webhooks (enabled by default). The chart sets it via `webhooks.enabled`.                                                                                                                            |
 | `WATCH_NAMESPACE` | Restricts the operator's watch to the listed namespaces (comma-separated). Empty/unset → cluster-scoped (all namespaces). The chart sets it via `watchNamespace`; combine with `rbac.scope=namespace` so the ServiceAccount only gets namespaced RBAC. |
+
+### Scraping operator metrics with Prometheus
+
+Enable the chart's ServiceMonitor with `--set metrics.serviceMonitor.enabled=true`.
+If your Prometheus configuration selects monitors by label, set matching
+`metrics.serviceMonitor.additionalLabels`.
+
+The chart serves metrics over HTTPS by default and creates a token Secret for
+a dedicated, read-only ServiceAccount. Kubernetes populates a long-lived
+token in this Secret. To manage the credential yourself, set
+`metrics.serviceMonitor.credentials.name` and
+`metrics.serviceMonitor.credentials.key` to select a token in a Secret in the
+release namespace. Bind its identity to a ClusterRole granting
+`get` on the non-resource URL `/metrics`.
+
+The generated manager certificate is self-signed by default. To verify the
+server identity, set `metrics.tlsSecretName` to a serving certificate Secret
+and set `metrics.serviceMonitor.tlsConfig` with `insecureSkipVerify: false`,
+the issuing CA, and the certificate's server name. See the Prometheus Operator
+[SafeTLSConfig reference](https://prometheus-operator.dev/docs/api-reference/api/#monitoring.coreos.com/v1.SafeTLSConfig)
+for the supported CA selectors.
+
+For an HTTP endpoint, set `metrics.secure=false`. This also removes the HTTP
+authentication layer. With `rbac.create=false`, supply the reader binding and
+grant the manager permission to create `TokenReview` and `SubjectAccessReview`
+resources when using HTTPS. Namespace-scoped installs also need those two
+cluster-level review permissions in HTTPS mode.
+
 
 ## kubectl plugin (`kubectl valkey`)
 
