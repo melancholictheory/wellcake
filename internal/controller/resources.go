@@ -239,7 +239,8 @@ func appliedSpecHash(v any) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func generatePassword(n int) (string, error) {
+func generatePassword() (string, error) {
+	const n = 32
 	b := make([]byte, n)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
@@ -1305,6 +1306,8 @@ func buildStatefulSet(vc *cachev1beta1.ValkeyCluster, configHash string, proacti
 		})
 	}
 
+	authVolumes := mountReadinessAuth(vc, &valkeyContainer)
+
 	containers := []corev1.Container{valkeyContainer}
 	if metricsEnabled(vc) {
 		containers = append(containers, buildExporter(vc))
@@ -1324,6 +1327,7 @@ func buildStatefulSet(vc *cachev1beta1.ValkeyCluster, configHash string, proacti
 			},
 		},
 	}
+	volumes = append(volumes, authVolumes...)
 	if tlsEnabled(vc) {
 		volumes = append(volumes, corev1.Volume{
 			Name: tlsVolumeName,
@@ -1843,24 +1847,25 @@ func defaultAntiAffinity(vc *cachev1beta1.ValkeyCluster) *corev1.Affinity {
 // A TCP check passes as soon as the port opens, so a rolling update could move
 // on and restart the primary while the replica to promote is still loading.
 // master_link_status is left out on purpose: during a failover every replica
-// has its link down at once. An error reply (NOAUTH after an in-place password
-// rotation) does not show these fields, so it does not fail the probe; only a
-// server that does not answer does.
+// has its link down at once. A successful probe requires an authenticated
+// INFO reply so it can distinguish a serving node from a loading replica.
 func dataReadinessProbe(vc *cachev1beta1.ValkeyCluster, port int32) *corev1.Probe {
 	cli := "valkey-cli -p " + strconv.Itoa(int(port))
 	if tlsEnabled(vc) {
 		cli += " --tls --insecure --cert " + tlsMountPath + "/" + secretKeyTLSCert + " --key " + tlsMountPath + "/" + secretKeyTLSKey
 	}
+	script := ""
 	if vc.Spec.AuthEnabled() {
-		cli += noAuthWarningArgs
+		// Read the projection during each probe. The container's startup
+		// environment does not change when the operator rotates the Secret.
+		script = "password=$(cat " + authMountPath + "/" + secretKeyPassword + " && printf .) || exit 1\n" +
+			"export REDISCLI_AUTH=\"${password%.}\"\n"
 	}
-	script := "out=$(" + cli + " INFO persistence replication) || exit 1\n" +
+	script += "out=$(" + cli + " INFO persistence replication) || exit 1\n" +
 		"out=$(printf '%s\\n' \"$out\" | tr -d '\\r')\n" +
-		"printf '%s\\n' \"$out\" | grep -qE '^(loading|master_sync_in_progress):1$' && exit 1\n" +
-		// A replica whose link has been down since it started (link down and
-		// master_link_down_since_seconds:-1) never synced and holds no data, for
-		// example one that cannot authenticate to its primary. One whose link
-		// dropped after a sync (a failover) keeps a positive value and stays Ready.
+		"printf '%s\\n' \"$out\" | grep -q '^loading:0$' || exit 1\n" +
+		"printf '%s\\n' \"$out\" | grep -q '^master_sync_in_progress:1$' && exit 1\n" +
+		// A replica whose link has been down since it started never synced.
 		"printf '%s\\n' \"$out\" | grep -q '^master_link_status:down$' && printf '%s\\n' \"$out\" | grep -q '^master_link_down_since_seconds:-1$' && exit 1\n" +
 		"exit 0"
 	return &corev1.Probe{

@@ -38,7 +38,7 @@ func TestRefreshRuntimeAuthAfterContainerRestart(t *testing.T) {
 			}
 			for range 2 {
 				cmd := exec.Command("sh", "-c", strings.ReplaceAll(refreshRuntimeAuth(tc.sentinel), dataMountPath, dir))
-				cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "VALKEY_PASSWORD=new", "SOURCE_PASSWORD=remote"}
+				cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "VALKEY_PASSWORD=new", "SOURCE_PASSWORD=remote", "EXPORTER_PASSWORD=metrics"}
 				if out, err := cmd.CombinedOutput(); err != nil {
 					t.Fatalf("refresh runtime auth: %v\n%s", err, out)
 				}
@@ -54,6 +54,9 @@ func TestRefreshRuntimeAuthAfterContainerRestart(t *testing.T) {
 			}
 			if tc.sentinel && !strings.Contains(string(config), `sentinel sentinel-pass "\x6e\x65\x77"`) {
 				t.Fatalf("Sentinel still has old peer credentials: %q", config)
+			}
+			if tc.sentinel && strings.Count(string(config), "user "+exporterACLUser+" on #") != 1 {
+				t.Fatalf("exporter user was not restored exactly once: %q", config)
 			}
 			if !tc.sentinel && !strings.Contains(string(config), `masterauth "\x72\x65\x6d\x6f\x74\x65"`) {
 				t.Fatalf("lost upstream credentials: %q", config)

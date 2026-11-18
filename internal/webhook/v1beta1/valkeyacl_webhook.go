@@ -79,7 +79,7 @@ func (v *ValkeyACLCustomValidator) validate(ctx context.Context, acl *cachev1bet
 		// replication, and exporter identities it seeds itself.
 		// Managing these via ValkeyACL would let a reset/DELUSER wipe the credential
 		// the operator's own connections depend on.
-		if u.Name == "default" || u.Name == "sentinel-user" || u.Name == "replicator" || u.Name == "wellcake-exporter" {
+		if u.Name == "default" || u.Name == "sentinel-user" || u.Name == "replicator" || u.Name == cachev1beta1.ExporterACLUser {
 			return nil, fmt.Errorf("user %q is reserved by the operator and cannot be managed via ValkeyACL", u.Name)
 		}
 	}

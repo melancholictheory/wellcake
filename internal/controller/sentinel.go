@@ -527,7 +527,10 @@ func buildSentinelStatefulSet(vc *cachev1beta1.ValkeyCluster, proactive bool) *a
 		sentinel := &sts.Spec.Template.Spec.Containers[0]
 		sentinel.Command = []string{shellCmd, "-c", refreshRuntimeAuth(true) + "exec valkey-server " + dataMountPath + "/runtime-sentinel.conf --sentinel"}
 		sentinel.Args = nil
-		sentinel.Env = []corev1.EnvVar{{Name: envValkeyPassword, ValueFrom: secretRef(authSecretName(vc), secretKeyPassword)}}
+		sentinel.Env = sentinelInitEnv(vc)
+		if sentinelMetricsEnabled(vc) {
+			sentinel.Env = append(sentinel.Env, exporterPasswordEnv(vc))
+		}
 	}
 	if sentinelMetricsEnabled(vc) {
 		sts.Spec.Template.Spec.Containers = append(sts.Spec.Template.Spec.Containers, buildSentinelExporter(vc))
@@ -682,11 +685,7 @@ func sentinelInitEnv(vc *cachev1beta1.ValkeyCluster) []corev1.EnvVar {
 	if !vc.Spec.AuthEnabled() {
 		return nil
 	}
-	env := []corev1.EnvVar{{Name: envValkeyPassword, ValueFrom: secretRef(authSecretName(vc), secretKeyPassword)}}
-	if sentinelMetricsEnabled(vc) {
-		env = append(env, exporterPasswordEnv(vc))
-	}
-	return env
+	return []corev1.EnvVar{{Name: envValkeyPassword, ValueFrom: secretRef(authSecretName(vc), secretKeyPassword)}}
 }
 
 // renderSentinelInitScript builds runtime-sentinel.conf from the ConfigMap on
@@ -755,13 +754,9 @@ fi
   PASSWORD_ARG=$(printf '%%s' "$VALKEY_PASSWORD" | valkey_config_arg)
   printf 'sentinel auth-pass %[7]s %%s\nrequirepass %%s\n' "$PASSWORD_ARG" "$PASSWORD_ARG" >> "$NEW"
 fi
-if [ -n "${EXPORTER_PASSWORD:-}" ]; then
-  PW_HASH=$(printf '%%s' "$EXPORTER_PASSWORD" | sha256sum | awk '{print $1}')
-  printf 'user %[9]s on #%%s %[10]s\n' "$PW_HASH" >> "$NEW"
-fi
 mv "$NEW" "$RT"
 `, dataMountPath, sentinelConfigName, sentinelStatefulSetName(vc),
-		sentinelListenPort(vc), tlsArgs, auth, sentinelMasterName, shellConfigArg, exporterACLUser, sentinelExporterACLCommands)
+		sentinelListenPort(vc), tlsArgs, auth, sentinelMasterName, shellConfigArg)
 }
 
 // sentinelPodNames lists the Sentinel StatefulSet's pod names. Selectors use

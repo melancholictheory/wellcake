@@ -378,7 +378,7 @@ func (r *ValkeyClusterReconciler) ensurePasswordSecret(ctx context.Context, vc *
 		return "", err
 	}
 
-	pw, err := generatePassword(32)
+	pw, err := generatePassword()
 	if err != nil {
 		return "", err
 	}

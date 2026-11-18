@@ -145,7 +145,7 @@ The operator generates a new password, rolls it out to the live instances
 (a live `ACL SETUSER` on the `default` user + `masterauth`, with no
 replication blip; in the Sentinel topology the Sentinels take it live too)
 and rewrites `<cluster>-auth`. The data and Sentinel pods keep running. Their
-exporters continue using the separate `<cluster>-exporter-auth` Secret.
+exporters continue using the separate `<cluster>-exporter-auth-<id>` Secret.
 Use a new token for each rotation.
 Verify that the operator processed the rotation:
 

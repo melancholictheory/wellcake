@@ -25,10 +25,29 @@ import (
 )
 
 const (
-	exporterACLUser             = "wellcake-exporter"
+	authVolumeName              = "valkey-auth"
+	authMountPath               = "/var/run/wellcake/auth"
+	exporterACLUser             = cachev1beta1.ExporterACLUser
 	exporterACLCommands         = "+ping +info +client|setname +cluster|info +slowlog|len +slowlog|get +latency|latest +latency|histogram"
-	sentinelExporterACLCommands = "+ping +info +client|setname +sentinel|masters +sentinel|ckquorum"
+	sentinelExporterACLCommands = "+ping +info +client|setname +sentinel|masters +sentinel|ckquorum +sentinel|sentinels +sentinel|slaves"
 )
+
+// Mount the whole projection so the kubelet can refresh it after rotation.
+func mountReadinessAuth(vc *cachev1beta1.ValkeyCluster, container *corev1.Container) []corev1.Volume {
+	if !vc.Spec.AuthEnabled() {
+		return nil
+	}
+	container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
+		Name: authVolumeName, MountPath: authMountPath, ReadOnly: true,
+	})
+	return []corev1.Volume{{
+		Name: authVolumeName,
+		VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{
+			SecretName: authSecretName(vc),
+			Items:      []corev1.KeyToPath{{Key: secretKeyPassword, Path: secretKeyPassword}},
+		}},
+	}}
+}
 
 // Encode bytes as Valkey's double-quoted hex escapes. This preserves leading,
 // embedded and trailing newlines as well as quotes and backslashes.
@@ -43,15 +62,17 @@ const shellConfigArg = `valkey_config_arg() {
 // server start so a container restart after live rotation uses the current Secret.
 func refreshRuntimeAuth(sentinel bool) string {
 	if sentinel {
-		return `set -eu
-umask 077
-` + shellConfigArg + `
-CONF=/data/runtime-sentinel.conf
-awk 'tolower($1) != "requirepass" && !(tolower($1) == "sentinel" && (tolower($2) == "auth-pass" || tolower($2) == "sentinel-pass"))' "$CONF" > "$CONF.auth"
-PASSWORD_ARG=$(printf '%s' "$VALKEY_PASSWORD" | valkey_config_arg)
-printf 'sentinel auth-pass mymaster %s\nsentinel sentinel-pass %s\nrequirepass %s\n' "$PASSWORD_ARG" "$PASSWORD_ARG" "$PASSWORD_ARG" >> "$CONF.auth"
+		return "set -eu\numask 077\n" + shellConfigArg + fmt.Sprintf(`
+CONF=%[1]s/runtime-sentinel.conf
+awk 'tolower($1) != "requirepass" && !(tolower($1) == "sentinel" && (tolower($2) == "auth-pass" || tolower($2) == "sentinel-pass")) && !(tolower($1) == "user" && $2 == "%[3]s")' "$CONF" > "$CONF.auth"
+PASSWORD_ARG=$(printf '%%s' "$VALKEY_PASSWORD" | valkey_config_arg)
+printf 'sentinel auth-pass %[2]s %%s\nsentinel sentinel-pass %%s\nrequirepass %%s\n' "$PASSWORD_ARG" "$PASSWORD_ARG" "$PASSWORD_ARG" >> "$CONF.auth"
+if [ -n "${EXPORTER_PASSWORD:-}" ]; then
+  EXPORTER_HASH=$(printf '%%s' "$EXPORTER_PASSWORD" | sha256sum | awk '{print $1}')
+  printf 'user %[3]s on #%%s %[4]s\n' "$EXPORTER_HASH" >> "$CONF.auth"
+fi
 mv "$CONF.auth" "$CONF"
-`
+`, dataMountPath, sentinelMasterName, exporterACLUser, sentinelExporterACLCommands)
 	}
 	return `set -eu
 umask 077
@@ -66,7 +87,10 @@ mv "$CONF.auth" "$CONF"
 }
 
 func exporterSecretName(vc *cachev1beta1.ValkeyCluster) string {
-	return vc.Name + "-exporter-auth"
+	// Use the CR UID to avoid collisions with a previous cluster that
+	// is still being garbage-collected or a user-managed Secret.
+	suffix := configHashFromData(map[string]string{"uid": string(vc.UID)})
+	return vc.Name + "-exporter-auth-" + suffix
 }
 
 func exporterPasswordEnv(vc *cachev1beta1.ValkeyCluster) corev1.EnvVar {
@@ -112,15 +136,26 @@ func (r *ValkeyClusterReconciler) ensureExporterSecret(ctx context.Context, vc *
 	key := client.ObjectKey{Namespace: vc.Namespace, Name: exporterSecretName(vc)}
 	var existing corev1.Secret
 	if err := r.Get(ctx, key, &existing); err == nil {
-		if password := string(existing.Data[secretKeyPassword]); metav1.IsControlledBy(&existing, vc) && password != "" {
+		if !metav1.IsControlledBy(&existing, vc) {
+			return "", fmt.Errorf("exporter Secret %s has an unexpected owner", key)
+		}
+		if password := string(existing.Data[secretKeyPassword]); password != "" {
 			return password, nil
 		}
-		return "", fmt.Errorf("exporter Secret %s has an unexpected owner or no password", key)
+		password, err := generatePassword()
+		if err != nil {
+			return "", err
+		}
+		if existing.Data == nil {
+			existing.Data = make(map[string][]byte)
+		}
+		existing.Data[secretKeyPassword] = []byte(password)
+		return password, r.Update(ctx, &existing)
 	} else if !apierrors.IsNotFound(err) {
 		return "", err
 	}
 
-	password, err := generatePassword(32)
+	password, err := generatePassword()
 	if err != nil {
 		return "", err
 	}

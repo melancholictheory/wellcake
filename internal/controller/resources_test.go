@@ -644,15 +644,15 @@ func TestBuildExporterAuthSecret(t *testing.T) {
 	gen := minimalCR()
 	gen.Spec.Metrics = &cachev1beta1.MetricsSpec{Enabled: true}
 	gen.Spec.Auth = &cachev1beta1.AuthSpec{Enabled: new(true)}
-	if got := passwordSecretRef(buildExporter(gen)); got != "test-exporter-auth" {
-		t.Errorf("exporter password secret = %q, want test-exporter-auth", got)
+	if got := passwordSecretRef(buildExporter(gen)); got != exporterSecretName(gen) {
+		t.Errorf("exporter password secret = %q, want %q", got, exporterSecretName(gen))
 	}
 
 	ext := minimalCR()
 	ext.Spec.Metrics = &cachev1beta1.MetricsSpec{Enabled: true}
 	ext.Spec.Auth = &cachev1beta1.AuthSpec{Enabled: new(true), ExistingSecret: "my-auth"}
-	if got := passwordSecretRef(buildExporter(ext)); got != "test-exporter-auth" {
-		t.Errorf("exporter password secret = %q, want test-exporter-auth", got)
+	if got := passwordSecretRef(buildExporter(ext)); got != exporterSecretName(ext) {
+		t.Errorf("exporter password secret = %q, want %q", got, exporterSecretName(ext))
 	}
 }
 
