@@ -64,7 +64,7 @@ Logging (zap flags from controller-runtime):
 | Env               | Purpose                                                                                                                                                                                                                                                |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `ENABLE_WEBHOOKS` | `="false"` disables registration of the validating webhooks (enabled by default). The chart sets it via `webhooks.enabled`.                                                                                                                            |
-| `WATCH_NAMESPACE` | Restricts the operator's watch to the listed namespaces (comma-separated). Empty/unset → cluster-scoped (all namespaces). The chart sets it via `watchNamespace`; combine with `rbac.scope=namespace` so the ServiceAccount only gets namespaced RBAC. |
+| `WATCH_NAMESPACE` | Restricts the operator's watch to the listed namespaces (comma-separated). Empty/unset → cluster-scoped (all namespaces). With `rbac.scope=namespace`, the chart defaults to the release namespace. Set `watchNamespace` to select a different namespace. |
 
 ### Scraping operator metrics with Prometheus
 
@@ -82,17 +82,19 @@ release namespace. Bind its identity to a ClusterRole granting
 
 The generated manager certificate is self-signed by default. To verify the
 server identity, set `metrics.tlsSecretName` to a serving certificate Secret
-and set `metrics.serviceMonitor.tlsConfig` with `insecureSkipVerify: false`,
-the issuing CA, and the certificate's server name. See the Prometheus Operator
+to enable certificate verification. Set the issuing CA and server name under
+`metrics.serviceMonitor.tlsConfig` as needed. See the Prometheus Operator
 [SafeTLSConfig reference](https://prometheus-operator.dev/docs/api-reference/api/#monitoring.coreos.com/v1.SafeTLSConfig)
 for the supported CA selectors.
 
-For an HTTP endpoint, set `metrics.secure=false`. This also removes the HTTP
-authentication layer. With `rbac.create=false`, supply the reader binding and
-grant the manager permission to create `TokenReview` and `SubjectAccessReview`
-resources when using HTTPS. Namespace-scoped installs also need those two
-cluster-level review permissions in HTTPS mode.
+HTTPS metrics require the manager to create `TokenReview` and
+`SubjectAccessReview` resources. Cluster-scoped releases with `rbac.create=true`
+create these permissions and the reader binding by default. In namespace
+scope, set `metrics.allowClusterRBAC=true` to let the chart create them, or
+have an administrator supply the permissions and the binding.
 
+For an unauthenticated HTTP endpoint, set `metrics.secure=false`. This mode
+works with namespace-only RBAC.
 
 ## kubectl plugin (`kubectl valkey`)
 

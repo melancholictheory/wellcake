@@ -66,6 +66,8 @@ metrics:
   port: 8443
   # Serve HTTPS and authorize scrapes with Kubernetes RBAC.
   secure: true
+  # Allow the chart to create cluster-scoped metrics RBAC in namespace mode.
+  allowClusterRBAC: false
   # Optional TLS Secret containing tls.crt and tls.key.
   tlsSecretName: ""
   service:
@@ -80,10 +82,9 @@ metrics:
     credentials:
       name: ""
       key: token
-    # The manager uses a self-signed serving certificate by default. Set
-    # insecureSkipVerify: false and configure ca and serverName to verify it.
-    tlsConfig:
-      insecureSkipVerify: true
+    # A configured serving Secret enables verification by default. Set ca
+    # and serverName as needed for the certificate.
+    tlsConfig: {}
   # PrometheusRule with baseline operator alerts (Prometheus Operator CRD).
   prometheusRule:
     enabled: false

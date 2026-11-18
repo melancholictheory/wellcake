@@ -29,10 +29,9 @@ spec:
         credentials:
           name: {{ default (include "valkey-operator.metricsReaderName" .) $credentials.name | quote }}
           key: {{ if $credentials.name }}{{ default "token" $credentials.key | quote }}{{ else }}"token"{{ end }}
-      {{- with (.Values.metrics.serviceMonitor.tlsConfig | default (dict "insecureSkipVerify" true)) }}
+      {{- $tlsConfig := mergeOverwrite (dict "insecureSkipVerify" (not .Values.metrics.tlsSecretName)) (.Values.metrics.serviceMonitor.tlsConfig | default dict) }}
       tlsConfig:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
+        {{- toYaml $tlsConfig | nindent 8 }}
       {{- else }}
       scheme: http
       {{- end }}

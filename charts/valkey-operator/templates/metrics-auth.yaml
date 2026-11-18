@@ -1,6 +1,8 @@
 {{- if and .Values.metrics.enabled (eq (include "valkey-operator.metricsSecure" .) "true") }}
 {{- $auth := printf "%s-%s-metrics-auth" .Release.Namespace (include "valkey-operator.fullname" .) }}
-{{- if .Values.rbac.create }}
+{{- $namespaceScoped := eq (include "valkey-operator.namespaceScoped" .) "true" }}
+{{- $manageMetricsRBAC := and .Values.rbac.create (or (not $namespaceScoped) .Values.metrics.allowClusterRBAC) }}
+{{- if $manageMetricsRBAC }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -53,7 +55,7 @@ metadata:
   annotations:
     kubernetes.io/service-account.name: {{ $reader | quote }}
 type: kubernetes.io/service-account-token
-{{- if .Values.rbac.create }}
+{{- if $manageMetricsRBAC }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
