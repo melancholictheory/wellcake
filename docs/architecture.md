@@ -225,6 +225,18 @@ The runtime config (`valkey.conf` plus per-pod lines such as `replicaof` or
 that anti-pattern is flagged by CVE scanners and breaks immutable-image
 policies.
 
+## Manager cache
+
+The manager watches managed Pods, StatefulSets, Services, ConfigMaps, disruption
+budgets, network policies, Jobs and CronJobs through a label selector. It can
+look up a secondary resource by name when its label is absent, then repair the
+label without rewriting the pod template. Pod reads use the filtered cache.
+
+Secret watches retain metadata so generated Secret changes, certificate
+renewals and external password changes can enqueue the cluster. Typed Secret
+reads go directly to the API server. The manager's cache holds no Secret data
+fields.
+
 ## Security defaults
 
 - **Auth by default.** A password Secret is auto-generated unless

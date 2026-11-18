@@ -282,11 +282,7 @@ func (r *ValkeyClusterReconciler) ensurePDB(ctx context.Context, vc *cachev1beta
 func (r *ValkeyClusterReconciler) applyPDB(ctx context.Context, vc *cachev1beta1.ValkeyCluster, desired *policyv1.PodDisruptionBudget) error {
 	key := client.ObjectKeyFromObject(desired)
 	if !pdbEnabled(vc) {
-		var existing policyv1.PodDisruptionBudget
-		if err := r.Get(ctx, key, &existing); err == nil {
-			return r.Delete(ctx, &existing)
-		}
-		return nil
+		return r.removeOptionalResource(ctx, vc, key, &policyv1.PodDisruptionBudget{})
 	}
 	if err := controllerutil.SetControllerReference(vc, desired, r.Scheme); err != nil {
 		return err
@@ -321,11 +317,7 @@ func (r *ValkeyClusterReconciler) ensureNetworkPolicy(ctx context.Context, vc *c
 	name := vc.Name + "-allow"
 	key := types.NamespacedName{Namespace: vc.Namespace, Name: name}
 	if !networkPolicyEnabled(vc) {
-		var existing networkingv1.NetworkPolicy
-		if err := r.Get(ctx, key, &existing); err == nil {
-			return r.Delete(ctx, &existing)
-		}
-		return nil
+		return r.removeOptionalResource(ctx, vc, key, &networkingv1.NetworkPolicy{})
 	}
 	desired := buildNetworkPolicy(vc)
 	if err := controllerutil.SetControllerReference(vc, desired, r.Scheme); err != nil {
@@ -574,8 +566,9 @@ func (r *ValkeyClusterReconciler) applyStatefulSet(ctx context.Context, vc *cach
 		// Skip the no-op Update when the live STS was last reconciled to the same
 		// desired hash (catches both server-default churn and a shrunk list).
 		if cur.Annotations[appliedHashAnnotation] == desiredHash {
+			err := patchManagedLabels(ctx, r.Client, &cur, desired.Labels)
 			existing = cur
-			return nil
+			return err
 		}
 		cur.Spec.Replicas = desired.Spec.Replicas
 		cur.Spec.Template = desired.Spec.Template
@@ -874,7 +867,7 @@ func (r *ValkeyClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&appsv1.StatefulSet{}).
 		Owns(&corev1.Service{}).
 		Owns(&corev1.ConfigMap{}).
-		Owns(&corev1.Secret{}, builder.MatchEveryOwner).
+		Owns(&corev1.Secret{}, builder.MatchEveryOwner, builder.OnlyMetadata).
 		Owns(&policyv1.PodDisruptionBudget{}).
 		Owns(&networkingv1.NetworkPolicy{}).
 		Owns(&batchv1.Job{}).
@@ -893,7 +886,7 @@ func (r *ValkeyClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		// and an auth.existingSecret (an external password rotation must re-render
 		// the config and roll the pods). Operator-managed Secrets are owned by the
 		// ValkeyCluster and already covered by Owns() above.
-		Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(r.mapSecretToCluster)).
+		Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(r.mapSecretToCluster), builder.OnlyMetadata).
 		Named("valkeycluster").
 		Complete(r)
 }
