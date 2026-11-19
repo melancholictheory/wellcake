@@ -542,11 +542,14 @@ instead, next to the rest of the cluster's configuration.
 `valkey.wellcake.io/rollout-hold: "true"` stops the operator before its next
 rollout step: it deletes no further pod and hands no primary over, while the
 StatefulSets already carry the new pod template. A pod already restarting
-finishes; the cluster then reports Ready on its current pods. A
+finishes; the cluster then reports Ready on its current pods. A held cluster
+is never reported as rolling, whatever state its pods are in, so a failure is
+handled as on a steady cluster: with the Replication topology the operator
+still promotes a replica when the primary fails. A
 `valkey.wellcake.io/restart` request is held too, since it rolls the pods the
 same way. Remove the annotation (or set it to `false`) to resume the rollout
 where it stopped. While a held cluster has stale pods, the operator logs
-`proactive rollout held` with the next pod to roll. Without
+`proactive rollout held` with the number of stale pods. Without
 `proactive-rollout` the annotation has no effect: the StatefulSet controller
 rolls the pods itself.
 

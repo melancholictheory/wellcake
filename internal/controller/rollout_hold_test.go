@@ -160,3 +160,124 @@ func TestReplicationRolloutHold(t *testing.T) {
 		}
 	}
 }
+
+// notReady marks a test pod NotReady.
+func notReady(p *corev1.Pod) *corev1.Pod {
+	p.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionFalse}}
+	return p
+}
+
+// TestReplicationRolloutHoldPrimaryDown: with two Ready replicas on the old
+// revision and the primary pod NotReady or absent, an unheld rollout waits
+// (in progress, so the caller skips reactive failover), while a held cluster
+// reports no rollout, so the caller runs reactive failover. Nothing is deleted.
+func TestReplicationRolloutHoldPrimaryDown(t *testing.T) {
+	data := map[string]string{instanceLabel: "vc"}
+	cases := []struct {
+		name    string
+		primary *corev1.Pod // nil: the pod is absent
+	}{
+		{"primary NotReady", notReady(holdTestPod("vc-0", data, "r1"))},
+		{"primary absent", nil},
+	}
+	for _, tc := range cases {
+		for _, held := range []bool{false, true} {
+			vc := &cachev1beta1.ValkeyCluster{
+				ObjectMeta: metav1.ObjectMeta{Name: "vc", Namespace: "ns"},
+				Spec: cachev1beta1.ValkeyClusterSpec{
+					Topology: cachev1beta1.TopologyReplication,
+					Replicas: 3,
+				},
+				Status: cachev1beta1.ValkeyClusterStatus{Primary: "vc-0"},
+			}
+			if held {
+				vc.Annotations = map[string]string{rolloutHoldAnnotation: "true"}
+			}
+			objs := make([]client.Object, 0, 5)
+			objs = append(objs, vc, holdTestSTS("vc", "r2"),
+				holdTestPod("vc-1", data, "r1"), holdTestPod("vc-2", data, "r1"))
+			if tc.primary != nil {
+				objs = append(objs, tc.primary.DeepCopy())
+			}
+			c := fake.NewClientBuilder().WithScheme(newTestScheme(t)).WithObjects(objs...).Build()
+			r := &ValkeyClusterReconciler{Client: c}
+
+			primary, inProgress, err := r.driveReplicationRollout(context.Background(), vc, "", nil)
+			if err != nil {
+				t.Fatalf("%s, held=%v: driveReplicationRollout: %v", tc.name, held, err)
+			}
+			if primary != "vc-0" {
+				t.Errorf("%s, held=%v: primary = %q, want vc-0", tc.name, held, primary)
+			}
+			if inProgress == held {
+				t.Errorf("%s, held=%v: inProgress = %v, want %v", tc.name, held, inProgress, !held)
+			}
+			if podExists(t, c, "vc-0") != (tc.primary != nil) {
+				t.Errorf("%s, held=%v: vc-0 was deleted", tc.name, held)
+			}
+			for _, n := range []string{"vc-1", "vc-2"} {
+				if !podExists(t, c, n) {
+					t.Errorf("%s, held=%v: %s was deleted", tc.name, held, n)
+				}
+			}
+		}
+	}
+}
+
+// TestSentinelRolloutHoldNotSteady: a Sentinel cluster whose pods are not all
+// there or not all Ready is in progress for an unheld rollout, but not for a
+// held one. Nothing is deleted.
+func TestSentinelRolloutHoldNotSteady(t *testing.T) {
+	data := map[string]string{instanceLabel: "vc"}
+	sen := map[string]string{instanceLabel: "vc", componentLabel: componentSentinel}
+	cases := []struct {
+		name string
+		pods []*corev1.Pod
+	}{
+		{"data pod absent", []*corev1.Pod{
+			holdTestPod("vc-1", data, "d1"), holdTestPod("vc-2", data, "d1"),
+			holdTestPod("vc-sentinel-0", sen, "s1"), holdTestPod("vc-sentinel-1", sen, "s1"),
+			holdTestPod("vc-sentinel-2", sen, "s1"),
+		}},
+		{"Sentinel pod NotReady", []*corev1.Pod{
+			holdTestPod("vc-0", data, "d2"), holdTestPod("vc-1", data, "d2"), holdTestPod("vc-2", data, "d2"),
+			notReady(holdTestPod("vc-sentinel-0", sen, "s1")), holdTestPod("vc-sentinel-1", sen, "s1"),
+			holdTestPod("vc-sentinel-2", sen, "s1"),
+		}},
+	}
+	for _, tc := range cases {
+		for _, held := range []bool{false, true} {
+			vc := &cachev1beta1.ValkeyCluster{
+				ObjectMeta: metav1.ObjectMeta{Name: "vc", Namespace: "ns"},
+				Spec: cachev1beta1.ValkeyClusterSpec{
+					Topology: cachev1beta1.TopologySentinel,
+					Replicas: 3,
+					Sentinel: &cachev1beta1.SentinelSpec{Replicas: 3},
+				},
+			}
+			if held {
+				vc.Annotations = map[string]string{rolloutHoldAnnotation: "true"}
+			}
+			objs := make([]client.Object, 0, 3+len(tc.pods))
+			objs = append(objs, vc, holdTestSTS("vc", "d2"), holdTestSTS("vc-sentinel", "s2"))
+			for _, p := range tc.pods {
+				objs = append(objs, p.DeepCopy())
+			}
+			c := fake.NewClientBuilder().WithScheme(newTestScheme(t)).WithObjects(objs...).Build()
+			r := &ValkeyClusterReconciler{Client: c}
+
+			inProgress, err := r.driveSentinelRollout(context.Background(), vc, "")
+			if err != nil {
+				t.Fatalf("%s, held=%v: driveSentinelRollout: %v", tc.name, held, err)
+			}
+			if inProgress == held {
+				t.Errorf("%s, held=%v: inProgress = %v, want %v", tc.name, held, inProgress, !held)
+			}
+			for _, p := range tc.pods {
+				if !podExists(t, c, p.Name) {
+					t.Errorf("%s, held=%v: %s was deleted", tc.name, held, p.Name)
+				}
+			}
+		}
+	}
+}

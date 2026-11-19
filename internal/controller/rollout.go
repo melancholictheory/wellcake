@@ -54,17 +54,25 @@ func rolloutHeld(vc *cachev1beta1.ValkeyCluster) bool {
 	return err == nil && v
 }
 
-// holdRolloutStep reports whether the next rollout step (a pod deletion or a
-// handover) must wait for the rollout-hold annotation to be lifted. A held
-// cluster is reported as not rolling, so its status and reactive failover stay
-// those of a steady cluster; a pod already restarting finishes on its own.
-func holdRolloutStep(ctx context.Context, vc *cachev1beta1.ValkeyCluster, pod, revision string) bool {
-	if !rolloutHeld(vc) {
-		return false
+// countStale returns how many pods are off the desired STS revision.
+func countStale(pods []rolloutPod, desiredRevision string) int {
+	n := 0
+	for _, p := range pods {
+		if p.revision != desiredRevision {
+			n++
+		}
+	}
+	return n
+}
+
+// logRolloutHeld records that the rollout-hold annotation keeps stale pods on
+// their current revision. Silent once nothing is left to roll.
+func logRolloutHeld(ctx context.Context, vc *cachev1beta1.ValkeyCluster, stalePods int) {
+	if stalePods == 0 {
+		return
 	}
 	logf.FromContext(ctx).Info("proactive rollout held by the "+rolloutHoldAnnotation+" annotation",
-		"name", vc.Name, "nextPod", pod, "revision", revision)
-	return true
+		"name", vc.Name, "stalePods", stalePods)
 }
 
 type rolloutPod struct {
@@ -150,16 +158,18 @@ func (r *ValkeyClusterReconciler) driveReplicationRollout(
 	if err != nil {
 		return primary, false, err
 	}
+	// A held cluster is never in progress, whatever state its pods are in, so
+	// the caller runs reactive failover as on a steady cluster.
+	if rolloutHeld(vc) {
+		logRolloutHeld(ctx, vc, countStale(pods, desiredRevision))
+		return primary, false, nil
+	}
 	// Wait until the full set exists before reasoning about a rollout.
 	if int32(len(pods)) < totalReplicas(vc) {
 		return primary, true, nil
 	}
 
 	action := nextRolloutStep(pods, desiredRevision, primary)
-	if (action.kind == rolloutRollReplica || action.kind == rolloutPromote) &&
-		holdRolloutStep(ctx, vc, action.pod, desiredRevision) {
-		return primary, false, nil
-	}
 	switch action.kind {
 	case rolloutNone:
 		return primary, false, nil
@@ -392,6 +402,10 @@ func (r *ValkeyClusterReconciler) driveClusterRollout(
 	if err != nil {
 		return false, err
 	}
+	if rolloutHeld(vc) {
+		logRolloutHeld(ctx, vc, countStale(pods, desiredRevision))
+		return false, nil
+	}
 	if int32(len(pods)) < totalReplicas(vc) {
 		return true, nil
 	}
@@ -416,10 +430,6 @@ func (r *ValkeyClusterReconciler) driveClusterRollout(
 	}
 
 	action := nextClusterRolloutStep(pods, shards, desiredRevision)
-	if action.kind != clusterRolloutNone && action.kind != clusterRolloutWait &&
-		holdRolloutStep(ctx, vc, action.pod, desiredRevision) {
-		return false, nil
-	}
 	switch action.kind {
 	case clusterRolloutNone:
 		return false, nil
