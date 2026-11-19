@@ -6,18 +6,16 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.14.3]
+
 ### Added
 
-- `valkey.wellcake.io/rollout-hold: "true"` holds the proactive rollout of a
-  cluster: the StatefulSets get the new pod template, but the operator deletes
-  no further pod and hands no primary over until the annotation is removed. A
-  pod already restarting finishes, and a held cluster reports Ready. A held
-  cluster is never reported as rolling, so with the Replication topology the
-  operator still promotes a replica when the primary fails. A
-  `valkey.wellcake.io/restart` request is held too. An operator upgrade that
-  changes the render (as 0.14.2 did) can then roll the clusters one at a time
-  instead of all at once. Without `proactive-rollout` the StatefulSet
-  controller rolls the pods and the annotation has no effect.
+- Set `valkey.wellcake.io/rollout-hold: "true"` on a cluster with
+  `proactive-rollout` enabled to pause the rollout before its next pod restart
+  or primary handover. Any pod already restarting can finish. Reactive failover
+  remains active in Replication topology. This also pauses rollouts triggered
+  by `valkey.wellcake.io/restart`. Remove the hold or set it to `false` to
+  resume. During an operator upgrade, this lets you roll clusters one at a time.
 
 ## [0.14.2]
 
@@ -750,6 +748,7 @@ First public release of the operator. Highlights of the initial feature set:
 - CEL XValidation for immutable and conditional fields; config-hash-driven
   rolling restarts; version-gated Valkey 9.x resilience directives.
 
+[0.14.3]: https://github.com/melancholictheory/wellcake/releases/tag/v0.14.3
 [0.14.2]: https://github.com/melancholictheory/wellcake/releases/tag/v0.14.2
 [0.14.1]: https://github.com/melancholictheory/wellcake/releases/tag/v0.14.1
 [0.14.0]: https://github.com/melancholictheory/wellcake/releases/tag/v0.14.0
