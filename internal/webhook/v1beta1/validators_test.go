@@ -339,6 +339,14 @@ func TestValkeyACLValidator(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "reserved exporter user -> error",
+			mutate: func(a *cachev1beta1.ValkeyACL) {
+				a.Spec.Users = []cachev1beta1.ValkeyACLUser{{Name: cachev1beta1.ExporterACLUser}}
+			},
+			objs:    []client.Object{cluster},
+			wantErr: true,
+		},
+		{
 			name: "reserved sentinel user -> error",
 			mutate: func(a *cachev1beta1.ValkeyACL) {
 				a.Spec.Users = []cachev1beta1.ValkeyACLUser{{Name: "sentinel-user"}}

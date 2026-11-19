@@ -67,6 +67,12 @@ func (r *ValkeyClusterReconciler) driveSentinelRollout(
 	if err != nil {
 		return false, err
 	}
+	// A held cluster is never in progress, on either plane, so its status stays
+	// that of a steady cluster.
+	if rolloutHeld(vc) {
+		logRolloutHeld(ctx, vc, countStale(dataPods, dataRev)+r.staleSentinelPods(ctx, vc))
+		return false, nil
+	}
 	if int32(len(dataPods)) < vc.Spec.Replicas {
 		return true, nil // set still forming
 	}
@@ -145,6 +151,21 @@ func (r *ValkeyClusterReconciler) driveSentinelRollout(
 		return true, nil
 	}
 	return false, nil
+}
+
+// staleSentinelPods counts the Sentinel pods off their StatefulSet's update
+// revision, for the rollout-hold log only: a lookup error counts as none.
+func (r *ValkeyClusterReconciler) staleSentinelPods(ctx context.Context, vc *cachev1beta1.ValkeyCluster) int {
+	var sts appsv1.StatefulSet
+	if err := r.Get(ctx, client.ObjectKey{Namespace: vc.Namespace, Name: sentinelStatefulSetName(vc)}, &sts); err != nil ||
+		sts.Status.UpdateRevision == "" {
+		return 0
+	}
+	pods, err := r.listSentinelRolloutPods(ctx, vc)
+	if err != nil {
+		return 0
+	}
+	return countStale(pods, sts.Status.UpdateRevision)
 }
 
 // anyStale reports whether any pod is off the desired STS revision.

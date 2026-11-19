@@ -39,14 +39,14 @@ kubectl -n valkey-system exec deploy/valkey-operator -- /manager --help
 
 | Flag                                         | Default               | Purpose                                                                                                                                                                        |
 | -------------------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `--metrics-bind-address`                     | `0`                   | Address of the metrics endpoint. `0` — disabled, `:8443` — HTTPS, `:8080` — HTTP. The chart sets it from `metrics.port`, or `0` when `metrics.enabled=false`.                  |
-| `--metrics-secure`                           | `true`                | Serve metrics over HTTPS with an authn/authz filter. `--metrics-secure=false` — plain HTTP.                                                                                    |
+| `--metrics-bind-address`                     | `0`                   | Address of the metrics endpoint. `0` disables it. The chart sets the port from `metrics.port` when `metrics.enabled=true`.                  |
+| `--metrics-secure`                           | `true`                | Serve metrics over HTTPS with a Kubernetes authn/authz filter. The chart sets this flag from `metrics.secure`.                                                                                    |
 | `--health-probe-bind-address`                | `:8081`               | Address of the liveness/readiness probes (`/healthz`, `/readyz`). Chart sets it from `probes.port`.                                                                            |
 | `--leader-elect`                             | `false`               | Leader election: guarantees a single active manager. The chart enables it when `replicaCount > 1`. Lease ID is `1e0a58e3.wellcake.io`.                                         |
 | `--enable-http2`                             | `false`               | HTTP/2 for the metrics/webhook servers. Disabled by default due to a CVE (Rapid Reset).                                                                                        |
 | `--webhook-cert-path`                        | `""`                  | Directory holding the webhook certificate. Empty → controller-runtime generates a self-signed one. The chart mounts the cert-manager secret here when `webhooks.enabled=true`. |
 | `--webhook-cert-name` / `--webhook-cert-key` | `tls.crt` / `tls.key` | File names of the cert/key in the directory above.                                                                                                                             |
-| `--metrics-cert-path`                        | `""`                  | Directory holding the metrics server certificate (for TLS metrics via cert-manager).                                                                                           |
+| `--metrics-cert-path`                        | `""`                  | Directory holding the metrics server certificate. The chart mounts it when `metrics.tlsSecretName` is set.                                                                                           |
 | `--metrics-cert-name` / `--metrics-cert-key` | `tls.crt` / `tls.key` | File names of the cert/key for metrics.                                                                                                                                        |
 
 Logging (zap flags from controller-runtime):
@@ -64,7 +64,37 @@ Logging (zap flags from controller-runtime):
 | Env               | Purpose                                                                                                                                                                                                                                                |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `ENABLE_WEBHOOKS` | `="false"` disables registration of the validating webhooks (enabled by default). The chart sets it via `webhooks.enabled`.                                                                                                                            |
-| `WATCH_NAMESPACE` | Restricts the operator's watch to the listed namespaces (comma-separated). Empty/unset → cluster-scoped (all namespaces). The chart sets it via `watchNamespace`; combine with `rbac.scope=namespace` so the ServiceAccount only gets namespaced RBAC. |
+| `WATCH_NAMESPACE` | Restricts the operator's watch to the listed namespaces (comma-separated). Empty/unset → cluster-scoped (all namespaces). With `rbac.scope=namespace`, the chart defaults to the release namespace. Set `watchNamespace` to select a different namespace. |
+
+### Scraping operator metrics with Prometheus
+
+Enable the chart's ServiceMonitor with `--set metrics.serviceMonitor.enabled=true`.
+If your Prometheus configuration selects monitors by label, set matching
+`metrics.serviceMonitor.additionalLabels`.
+
+The chart serves metrics over HTTPS by default and creates a token Secret for
+a dedicated, read-only ServiceAccount. Kubernetes populates a long-lived
+token in this Secret. To manage the credential yourself, set
+`metrics.serviceMonitor.credentials.name` and
+`metrics.serviceMonitor.credentials.key` to select a token in a Secret in the
+release namespace. Bind its identity to a ClusterRole granting
+`get` on the non-resource URL `/metrics`.
+
+The generated manager certificate is self-signed by default. To verify the
+server identity, set `metrics.tlsSecretName` to a serving certificate Secret
+to enable certificate verification. Set the issuing CA and server name under
+`metrics.serviceMonitor.tlsConfig` as needed. See the Prometheus Operator
+[SafeTLSConfig reference](https://prometheus-operator.dev/docs/api-reference/api/#monitoring.coreos.com/v1.SafeTLSConfig)
+for the supported CA selectors.
+
+HTTPS metrics require the manager to create `TokenReview` and
+`SubjectAccessReview` resources. Cluster-scoped releases with `rbac.create=true`
+create these permissions and the reader binding by default. In namespace
+scope, set `metrics.allowClusterRBAC=true` to let the chart create them, or
+have an administrator supply the permissions and the binding.
+
+For an unauthenticated HTTP endpoint, set `metrics.secure=false`. This mode
+works with namespace-only RBAC.
 
 ## kubectl plugin (`kubectl valkey`)
 
@@ -144,10 +174,9 @@ kubectl -n <ns> annotate valkeycluster <cluster> \
 The operator generates a new password, rolls it out to the live instances
 (a live `ACL SETUSER` on the `default` user + `masterauth`, with no
 replication blip; in the Sentinel topology the Sentinels take it live too)
-and rewrites `<cluster>-auth`. The data pods then roll once, one at a time,
-so the metrics exporter and the init scripts pick up the new Secret; the
-Sentinels do not restart. The action is idempotent
-by token — a repeat reconcile with the same annotation value does nothing.
+and rewrites `<cluster>-auth`. The data and Sentinel pods keep running. Readiness probes and
+exporters continue using the separate `<cluster>-internal-auth-<id>` Secret.
+Use a new token for each rotation.
 Verify that the operator processed the rotation:
 
 ```sh
@@ -162,9 +191,9 @@ Secret.
 
 **Limitation:** for a **user-managed** Secret (`auth.existingSecret` set),
 in-place rotation is not available — the operator does not know the old
-password if the user changes it. There, rotation is the old way: edit the
-source Secret and restart the pods manually
-(`kubectl rollout restart sts/<cluster>`).
+password if the user changes it. Editing the source Secret changes the pod
+template. Plan this change during maintenance for replicated clusters. A
+new replica can fail to authenticate until the primary uses the new password.
 
 ### Reloading the TLS certificate without a restart
 
@@ -508,6 +537,31 @@ kubectl -n <ns> annotate valkeycluster <cluster> valkey.wellcake.io/proactive-ro
 
 With the valkey-cluster chart, it can be set in the `annotations` value
 instead, next to the rest of the cluster's configuration.
+
+**Holding a proactive rollout.** With `proactive-rollout`, the annotation
+`valkey.wellcake.io/rollout-hold: "true"` stops the operator before its next
+rollout step: it deletes no further pod and hands no primary over, while the
+StatefulSets already carry the new pod template. A pod already restarting
+finishes; the cluster then reports Ready on its current pods. A held cluster
+is never reported as rolling, whatever state its pods are in, so a failure is
+handled as on a steady cluster: with the Replication topology the operator
+still promotes a replica when the primary fails. A
+`valkey.wellcake.io/restart` request is held too, since it rolls the pods the
+same way. Remove the annotation (or set it to `false`) to resume the rollout
+where it stopped. While a held cluster has stale pods, the operator logs
+`proactive rollout held` with the number of stale pods. Without
+`proactive-rollout` the annotation has no effect: the StatefulSet controller
+rolls the pods itself.
+
+It is meant for an operator upgrade that changes the render of many
+clusters: annotate them all before the upgrade, then lift the hold one
+cluster at a time.
+
+```sh
+kubectl -n <ns> annotate valkeycluster <cluster> valkey.wellcake.io/rollout-hold=true
+# after the operator upgrade, cluster by cluster:
+kubectl -n <ns> annotate valkeycluster <cluster> valkey.wellcake.io/rollout-hold-
+```
 
 Password rotation needs no manual restart: the operator applies the new
 password live, then the data pods roll once on their own (see "Password
@@ -866,7 +920,11 @@ upgraded:
   (config-hash) — for example, a new version changed `valkey.conf`/the init
   script. This is a routine one-pod-at-a-time rolling restart, and the PDB
   protects the quorum. Check the `CHANGELOG` for render changes before
-  upgrading durable clusters.
+  upgrading durable clusters. Each cluster rolls one pod at a time, but
+  clusters roll in parallel. To roll them one at a time, set
+  `valkey.wellcake.io/rollout-hold: "true"` on the clusters with
+  `proactive-rollout` before the upgrade, then remove it cluster by cluster
+  (see "Holding a proactive rollout").
 - **CRDs.** The chart ships CRDs as templates, so `helm upgrade` applies schema
   changes like any other resource — no separate step. They carry
   `helm.sh/resource-policy: keep`, so `helm uninstall` leaves them (and every

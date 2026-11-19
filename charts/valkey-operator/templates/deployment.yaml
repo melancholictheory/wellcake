@@ -1,3 +1,4 @@
+{{- $metricsTLSSecret := and .Values.metrics.enabled (eq (include "valkey-operator.metricsSecure" .) "true") .Values.metrics.tlsSecretName -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -43,6 +44,10 @@ spec:
             - --health-probe-bind-address=:{{ .Values.probes.port }}
             {{- if .Values.metrics.enabled }}
             - --metrics-bind-address=:{{ .Values.metrics.port }}
+            - --metrics-secure={{ include "valkey-operator.metricsSecure" . }}
+            {{- if $metricsTLSSecret }}
+            - --metrics-cert-path=/var/run/wellcake/metrics-tls
+            {{- end }}
             {{- else }}
             - --metrics-bind-address=0
             {{- end }}
@@ -60,9 +65,9 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
-            {{- if .Values.watchNamespace }}
+            {{- if eq (include "valkey-operator.namespaceScoped" .) "true" }}
             - name: WATCH_NAMESPACE
-              value: {{ .Values.watchNamespace | quote }}
+              value: {{ default .Release.Namespace .Values.watchNamespace | quote }}
             {{- end }}
             - name: ENABLE_WEBHOOKS
               value: {{ if .Values.webhooks.enabled }}"true"{{ else }}"false"{{ end }}
@@ -103,17 +108,31 @@ spec:
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- if .Values.webhooks.enabled }}
+          {{- if or .Values.webhooks.enabled $metricsTLSSecret }}
           volumeMounts:
+            {{- if .Values.webhooks.enabled }}
             - name: webhook-certs
               mountPath: /tmp/k8s-webhook-server/serving-certs
               readOnly: true
+            {{- end }}
+            {{- if $metricsTLSSecret }}
+            - name: metrics-tls
+              mountPath: /var/run/wellcake/metrics-tls
+              readOnly: true
+            {{- end }}
           {{- end }}
-      {{- if .Values.webhooks.enabled }}
+      {{- if or .Values.webhooks.enabled $metricsTLSSecret }}
       volumes:
+        {{- if .Values.webhooks.enabled }}
         - name: webhook-certs
           secret:
             secretName: {{ include "valkey-operator.fullname" . }}-webhook-certs
+        {{- end }}
+        {{- if $metricsTLSSecret }}
+        - name: metrics-tls
+          secret:
+            secretName: {{ $metricsTLSSecret | quote }}
+        {{- end }}
       {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:

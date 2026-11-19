@@ -6,6 +6,27 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- The operator no longer adds an error to the Valkey pods' `errorstat_ERR`
+  each time it connects (every minute per pod on a healthy Sentinel cluster).
+  go-redis sent `CLIENT MAINT_NOTIFICATIONS`, a Redis Cloud feature, on each
+  RESP3 connection, and Valkey answered "unknown subcommand". The operator now
+  turns it off.
+
+## [0.14.3]
+
+### Added
+
+- Set `valkey.wellcake.io/rollout-hold: "true"` on a cluster with
+  `proactive-rollout` enabled to pause the rollout before its next pod restart
+  or primary handover. Any pod already restarting can finish. Reactive failover
+  remains active in Replication topology. This also pauses rollouts triggered
+  by `valkey.wellcake.io/restart`. Remove the hold or set it to `false` to
+  resume. During an operator upgrade, this lets you roll clusters one at a time.
+
+## [0.14.2]
+
 ### Added
 
 - In the Sentinel topology, `spec.metrics.sentinel` adds the exporter sidecar
@@ -35,11 +56,20 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   restarted replica would come up without `masterauth` against a primary that
   still requires it. Create a new cluster without auth instead. Standalone
   clusters can still turn auth on and off.
-- The operator no longer adds an error to the Valkey pods' `errorstat_ERR`
-  each time it connects (every minute per pod on a healthy Sentinel cluster).
-  go-redis sent `CLIENT MAINT_NOTIFICATIONS`, a Redis Cloud feature, on each
-  RESP3 connection, and Valkey answered "unknown subcommand". The operator now
-  turns it off.
+
+- Valkey and Sentinel read their passwords from Secrets at startup. Upgrading
+  rolls the data and Sentinel pods once to replace the old ConfigMaps.
+  Subsequent operator-managed password rotations keep pods running, preserve
+  authenticated readiness checks, and leave exporter credentials intact
+  (#105, #117).
+- The operator Helm chart configures the ServiceMonitor protocol, credentials,
+  and RBAC together. Namespace-scoped releases opt into chart-managed
+  cluster-level metrics RBAC with `metrics.allowClusterRBAC=true`. A custom
+  serving certificate enables TLS verification by default (#111, #118).
+- The manager limits workload informers to operator-managed resources and
+  watches only Secret metadata. Named reads can recover unlabeled managed
+  objects and repair labels without modifying the StatefulSet pod template
+  (#112, #119).
 
 ## [0.14.1]
 
@@ -726,6 +756,8 @@ First public release of the operator. Highlights of the initial feature set:
 - CEL XValidation for immutable and conditional fields; config-hash-driven
   rolling restarts; version-gated Valkey 9.x resilience directives.
 
+[0.14.3]: https://github.com/melancholictheory/wellcake/releases/tag/v0.14.3
+[0.14.2]: https://github.com/melancholictheory/wellcake/releases/tag/v0.14.2
 [0.14.1]: https://github.com/melancholictheory/wellcake/releases/tag/v0.14.1
 [0.14.0]: https://github.com/melancholictheory/wellcake/releases/tag/v0.14.0
 [0.13.1]: https://github.com/melancholictheory/wellcake/releases/tag/v0.13.1

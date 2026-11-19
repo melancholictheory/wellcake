@@ -34,11 +34,7 @@ func (r *ValkeyClusterReconciler) ensureBackupCronJob(ctx context.Context, vc *c
 
 	want := vc.Spec.Backup != nil && vc.Spec.Backup.Enabled
 	if !want {
-		var existing batchv1.CronJob
-		if err := r.Get(ctx, key, &existing); err == nil {
-			return r.Delete(ctx, &existing)
-		}
-		return nil
+		return r.removeOptionalResource(ctx, vc, key, &batchv1.CronJob{})
 	}
 	if vc.Spec.Backup.S3 == nil {
 		return fmt.Errorf("backup.s3 is required when backup.enabled=true")
@@ -66,7 +62,7 @@ func (r *ValkeyClusterReconciler) ensureBackupCronJob(ctx context.Context, vc *c
 		return err
 	}
 	if existing.Annotations[appliedHashAnnotation] == desiredHash {
-		return nil
+		return patchManagedLabels(ctx, r.Client, &existing, desired.Labels)
 	}
 	existing.Spec = desired.Spec
 	existing.Labels = desired.Labels

@@ -196,6 +196,9 @@ func (r *ValkeyACLReconciler) applyACLFanout(
 		}
 		reached++
 		for _, u := range acl.Spec.Users {
+			if isReservedACLUser(u.Name) {
+				continue
+			}
 			if err := applyACLUser(ctx, c, u, userPasswords[u.Name]); err != nil {
 				log.Error(err, "ACL SETUSER failed", "user", u.Name, "host", host)
 			}

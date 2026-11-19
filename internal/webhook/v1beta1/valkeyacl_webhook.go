@@ -75,11 +75,11 @@ func (v *ValkeyACLCustomValidator) validate(ctx context.Context, acl *cachev1bet
 			return nil, fmt.Errorf("duplicate user %q in spec.users", u.Name)
 		}
 		seen[u.Name] = struct{}{}
-		// Reserved by the operator: the default user plus the dedicated Sentinel
-		// (sentinel-user) and replication (replicator) identities it seeds itself.
+		// Reserved by the operator: the default user plus the dedicated Sentinel,
+		// replication, and exporter identities it seeds itself.
 		// Managing these via ValkeyACL would let a reset/DELUSER wipe the credential
 		// the operator's own connections depend on.
-		if u.Name == "default" || u.Name == "sentinel-user" || u.Name == "replicator" {
+		if u.Name == "default" || u.Name == "sentinel-user" || u.Name == "replicator" || u.Name == cachev1beta1.ExporterACLUser {
 			return nil, fmt.Errorf("user %q is reserved by the operator and cannot be managed via ValkeyACL", u.Name)
 		}
 	}

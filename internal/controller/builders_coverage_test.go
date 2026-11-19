@@ -82,7 +82,7 @@ func TestRenderValkeyConfProfiles(t *testing.T) {
 	}
 
 	// Cache: allkeys-lru eviction, persistence off, maxmemory ~60% of limit.
-	cache := renderValkeyConf(withMem(cachev1beta1.ProfileCache, "1Gi"), "")
+	cache := renderValkeyConf(withMem(cachev1beta1.ProfileCache, "1Gi"))
 	for _, want := range []string{"maxmemory-policy allkeys-lru", "appendonly no", "maxmemory 644245094b"} {
 		if !strings.Contains(cache, want) {
 			t.Errorf("cache conf missing %q\n%s", want, cache)
@@ -90,7 +90,7 @@ func TestRenderValkeyConfProfiles(t *testing.T) {
 	}
 
 	// Durable: noeviction, AOF on with save rules.
-	durable := renderValkeyConf(withMem(cachev1beta1.ProfileDurable, "1Gi"), "")
+	durable := renderValkeyConf(withMem(cachev1beta1.ProfileDurable, "1Gi"))
 	for _, want := range []string{"maxmemory-policy noeviction", "appendonly yes", "save 3600 1"} {
 		if !strings.Contains(durable, want) {
 			t.Errorf("durable conf missing %q\n%s", want, durable)
@@ -98,21 +98,15 @@ func TestRenderValkeyConfProfiles(t *testing.T) {
 	}
 
 	// No memory limit → no maxmemory directive (operator must not invent one).
-	noLimit := renderValkeyConf(withMem(cachev1beta1.ProfileCache, ""), "")
+	noLimit := renderValkeyConf(withMem(cachev1beta1.ProfileCache, ""))
 	if strings.Contains(noLimit, "\nmaxmemory ") {
 		t.Errorf("no memory limit must not emit maxmemory\n%s", noLimit)
-	}
-
-	// Password → requirepass + masterauth.
-	withPass := renderValkeyConf(withMem(cachev1beta1.ProfileCache, "1Gi"), "s3cr3t")
-	if !strings.Contains(withPass, `requirepass "s3cr3t"`) || !strings.Contains(withPass, `masterauth "s3cr3t"`) {
-		t.Errorf("password conf must set requirepass + masterauth\n%s", withPass)
 	}
 
 	// spec.config overrides the computed defaults.
 	ovr := withMem(cachev1beta1.ProfileCache, "1Gi")
 	ovr.Spec.Config = map[string]string{"maxmemory-policy": "volatile-lru"}
-	if c := renderValkeyConf(ovr, ""); !strings.Contains(c, "maxmemory-policy volatile-lru") {
+	if c := renderValkeyConf(ovr); !strings.Contains(c, "maxmemory-policy volatile-lru") {
 		t.Errorf("spec.config must override maxmemory-policy\n%s", c)
 	}
 }
@@ -130,7 +124,7 @@ func TestRenderSentinelConf(t *testing.T) {
 	vc := sentinelCR()
 
 	// Default quorum = replicas/2 + 1 = 2 for 3 replicas.
-	conf := renderSentinelConf(vc, "")
+	conf := renderSentinelConf(vc)
 	if !strings.Contains(conf, "mymaster") || !strings.Contains(conf, "5000") {
 		t.Errorf("sentinel conf missing monitor/down-after\n%s", conf)
 	}
@@ -144,25 +138,24 @@ func TestRenderSentinelConf(t *testing.T) {
 
 	// Explicit quorum override.
 	vc.Spec.Sentinel.Quorum = 3
-	if c := renderSentinelConf(vc, ""); !strings.Contains(c, " 3\n") {
+	if c := renderSentinelConf(vc); !strings.Contains(c, " 3\n") {
 		t.Errorf("explicit quorum 3 not honored\n%s", c)
 	}
 
-	// Password → sentinel auth-user (dedicated ACL user) + auth-pass + requirepass.
-	if c := renderSentinelConf(sentinelCR(), "pw"); !strings.Contains(c, `auth-pass mymaster "pw"`) || !strings.Contains(c, `requirepass "pw"`) {
-		t.Errorf("sentinel auth not rendered\n%s", c)
+	auth := sentinelCR()
+	auth.Spec.Auth = &cachev1beta1.AuthSpec{Enabled: new(true)}
+	conf = renderSentinelConf(auth)
+	if !strings.Contains(conf, "auth-user mymaster sentinel-user") {
+		t.Errorf("sentinel must authenticate to master as the dedicated ACL user\n%s", conf)
 	}
-	if c := renderSentinelConf(sentinelCR(), "pw"); !strings.Contains(c, "auth-user mymaster sentinel-user") {
-		t.Errorf("sentinel must authenticate to master as the dedicated ACL user\n%s", c)
-	}
-	if c := renderSentinelConf(sentinelCR(), `abc"def`); !strings.Contains(c, `auth-pass mymaster "abc\"def"`) || !strings.Contains(c, `requirepass "abc\"def"`) {
-		t.Errorf("sentinel auth password must be escaped\n%s", c)
+	if strings.Contains(conf, "auth-pass") || strings.Contains(conf, "requirepass") {
+		t.Errorf("Sentinel ConfigMap must exclude password directives\n%s", conf)
 	}
 
 	// TLS → tls-port + plaintext disabled + tls-replication.
 	tlsCR := sentinelCR()
 	tlsCR.Spec.TLS = &cachev1beta1.TLSSpec{Enabled: true}
-	if c := renderSentinelConf(tlsCR, ""); !strings.Contains(c, "tls-replication yes") || !strings.Contains(c, "port 0") {
+	if c := renderSentinelConf(tlsCR); !strings.Contains(c, "tls-replication yes") || !strings.Contains(c, "port 0") {
 		t.Errorf("sentinel TLS block missing\n%s", c)
 	}
 }
@@ -219,7 +212,7 @@ func TestSentinelServesOnTLSPort(t *testing.T) {
 		want := int32(26379)
 		if tlsOn {
 			want = 26380
-			if c := renderSentinelConf(vc, ""); !strings.Contains(c, "tls-port 26380\n") || !strings.Contains(c, "port 0\n") {
+			if c := renderSentinelConf(vc); !strings.Contains(c, "tls-port 26380\n") || !strings.Contains(c, "port 0\n") {
 				t.Fatalf("TLS sentinel.conf must serve on tls-port 26380 only\n%s", c)
 			}
 		}

@@ -317,7 +317,7 @@ func TestRenderValkeyConfHasProfileDefaults(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			vc := minimalCR()
 			vc.Spec.Profile = tc.profile
-			conf := renderValkeyConf(vc, "")
+			conf := renderValkeyConf(vc)
 			if !strings.Contains(conf, "maxmemory-policy "+tc.wantPolicy) {
 				t.Errorf("missing maxmemory-policy %s\n%s", tc.wantPolicy, conf)
 			}
@@ -418,7 +418,7 @@ func runInitScript(t *testing.T, vc *cachev1beta1.ValkeyCluster, dataDir, passwo
 	}
 	script := strings.NewReplacer(configMountPath, cfgDir, dataMountPath, dataDir).Replace(renderInitScript(vc))
 	cmd := exec.Command("sh", "-c", script)
-	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOSTNAME=" + vc.Name + "-1", "POD_NAMESPACE=" + vc.Namespace}
+	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOSTNAME=" + vc.Name + "-1", "POD_NAMESPACE=" + vc.Namespace, "WELLCAKE_INTERNAL_PASSWORD=probe-password"}
 	if password != "" {
 		cmd.Env = append(cmd.Env, "VALKEY_PASSWORD="+password)
 	}
@@ -507,30 +507,28 @@ func TestInitScriptAuthToggleRewritesManagedACLUsers(t *testing.T) {
 func TestRenderValkeyConfMutualTLS(t *testing.T) {
 	vc := minimalCR()
 	vc.Spec.TLS = &cachev1beta1.TLSSpec{Enabled: true}
-	if got := renderValkeyConf(vc, ""); !strings.Contains(got, "tls-auth-clients optional") {
+	if got := renderValkeyConf(vc); !strings.Contains(got, "tls-auth-clients optional") {
 		t.Errorf("TLS without MutualTLS should keep client auth optional\n%s", got)
 	}
 	vc.Spec.TLS.MutualTLS = true
-	if got := renderValkeyConf(vc, ""); !strings.Contains(got, "tls-auth-clients yes") {
+	if got := renderValkeyConf(vc); !strings.Contains(got, "tls-auth-clients yes") {
 		t.Errorf("MutualTLS=true must enforce client auth (tls-auth-clients yes)\n%s", got)
 	}
 }
 
-func TestRenderValkeyConfEscapesPasswordArguments(t *testing.T) {
+func TestInitScriptEscapesPasswordArguments(t *testing.T) {
 	vc := minimalCR()
-	password := `abc" def\#ghi`
-	conf := renderValkeyConf(vc, password)
-	quoted := valkeyConfigArg(password)
-	for _, want := range []string{
-		"requirepass " + quoted,
-		"masterauth " + quoted,
-	} {
-		if !strings.Contains(conf, want) {
-			t.Errorf("missing escaped password directive %q\n%s", want, conf)
-		}
+	const password = "a\"\\\n"
+	dataDir := t.TempDir()
+	runInitScript(t, vc, dataDir, password)
+	conf, err := os.ReadFile(filepath.Join(dataDir, "runtime.conf"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if strings.Contains(conf, `requirepass abc"`) {
-		t.Errorf("password must not be rendered as an unquoted config argument\n%s", conf)
+	for _, want := range []string{`requirepass "\x61\x22\x5c\x0a"`, `masterauth "\x61\x22\x5c\x0a"`} {
+		if !strings.Contains(string(conf), want) {
+			t.Errorf("runtime.conf is missing %q\n%s", want, conf)
+		}
 	}
 }
 
@@ -553,14 +551,12 @@ func TestRenderValkeyConfClusterDirectives(t *testing.T) {
 	vc.Spec.Shards = ptr.To[int32](3)
 	vc.Spec.Profile = cachev1beta1.ProfileDurable
 
-	conf := renderValkeyConf(vc, "secret")
+	conf := renderValkeyConf(vc)
 	for _, want := range []string{
 		"cluster-enabled yes",
 		"cluster-config-file " + dataMountPath + "/nodes.conf",
 		"cluster-node-timeout 5000",
 		"cluster-require-full-coverage yes", // Durable requires it
-		`requirepass "secret"`,
-		`masterauth "secret"`,
 	} {
 		if !strings.Contains(conf, want) {
 			t.Errorf("missing %q\n%s", want, conf)
@@ -577,25 +573,25 @@ func TestRenderValkeyConfReplBacklog(t *testing.T) {
 	}
 
 	// Replication with a small limit clamps to the 16MB floor.
-	if conf := renderValkeyConf(withLimit(cachev1beta1.TopologyReplication, "64Mi"), ""); !strings.Contains(conf, "repl-backlog-size 16777216b") {
+	if conf := renderValkeyConf(withLimit(cachev1beta1.TopologyReplication, "64Mi")); !strings.Contains(conf, "repl-backlog-size 16777216b") {
 		t.Errorf("64Mi limit should clamp backlog to 16MB floor\n%s", conf)
 	}
 	// A large limit clamps to the 256MB ceiling.
-	if conf := renderValkeyConf(withLimit(cachev1beta1.TopologyReplication, "32Gi"), ""); !strings.Contains(conf, "repl-backlog-size 268435456b") {
+	if conf := renderValkeyConf(withLimit(cachev1beta1.TopologyReplication, "32Gi")); !strings.Contains(conf, "repl-backlog-size 268435456b") {
 		t.Errorf("32Gi limit should clamp backlog to 256MB ceiling\n%s", conf)
 	}
 	// Mid-range scales to ~1/16 of the limit (2Gi → 128MB).
-	if conf := renderValkeyConf(withLimit(cachev1beta1.TopologyReplication, "2Gi"), ""); !strings.Contains(conf, "repl-backlog-size 134217728b") {
+	if conf := renderValkeyConf(withLimit(cachev1beta1.TopologyReplication, "2Gi")); !strings.Contains(conf, "repl-backlog-size 134217728b") {
 		t.Errorf("2Gi limit should size backlog to 128MB\n%s", conf)
 	}
 	// Standalone never has replicas → no backlog line.
-	if conf := renderValkeyConf(withLimit(cachev1beta1.TopologyStandalone, "2Gi"), ""); strings.Contains(conf, "repl-backlog-size") {
+	if conf := renderValkeyConf(withLimit(cachev1beta1.TopologyStandalone, "2Gi")); strings.Contains(conf, "repl-backlog-size") {
 		t.Errorf("Standalone must not set repl-backlog-size\n%s", conf)
 	}
 	// Explicit user config wins over the computed default.
 	vc := withLimit(cachev1beta1.TopologyReplication, "2Gi")
 	vc.Spec.Config = map[string]string{"repl-backlog-size": "512mb"}
-	conf := renderValkeyConf(vc, "")
+	conf := renderValkeyConf(vc)
 	if !strings.Contains(conf, "repl-backlog-size 512mb") || strings.Contains(conf, "repl-backlog-size 134217728b") {
 		t.Errorf("user repl-backlog-size override must win\n%s", conf)
 	}
@@ -644,22 +640,19 @@ func TestBuildExporterAuthSecret(t *testing.T) {
 		return ""
 	}
 
-	// Operator-managed auth → generated <name>-auth Secret.
+	// Both auth modes use independent credentials for the exporter.
 	gen := minimalCR()
 	gen.Spec.Metrics = &cachev1beta1.MetricsSpec{Enabled: true}
 	gen.Spec.Auth = &cachev1beta1.AuthSpec{Enabled: new(true)}
-	if got := passwordSecretRef(buildExporter(gen)); got != "test-auth" {
-		t.Errorf("exporter password secret = %q, want test-auth", got)
+	if got := passwordSecretRef(buildExporter(gen)); got != internalAuthSecretName(gen) {
+		t.Errorf("exporter password secret = %q, want %q", got, internalAuthSecretName(gen))
 	}
 
-	// User-supplied existingSecret → exporter must reference it, not <name>-auth.
-	// Otherwise the sidecar can't start (secret not found) and the pod never
-	// becomes Ready — the sec-01-tls-auth regression.
 	ext := minimalCR()
 	ext.Spec.Metrics = &cachev1beta1.MetricsSpec{Enabled: true}
 	ext.Spec.Auth = &cachev1beta1.AuthSpec{Enabled: new(true), ExistingSecret: "my-auth"}
-	if got := passwordSecretRef(buildExporter(ext)); got != "my-auth" {
-		t.Errorf("exporter password secret = %q, want my-auth (existingSecret)", got)
+	if got := passwordSecretRef(buildExporter(ext)); got != internalAuthSecretName(ext) {
+		t.Errorf("exporter password secret = %q, want %q", got, internalAuthSecretName(ext))
 	}
 }
 
@@ -846,7 +839,7 @@ func TestSourceCAMergeRendersCombinedBundle(t *testing.T) {
 	// tls-ca-cert-file must point at the combined bundle on the data PVC, not the
 	// cluster's own ca.crt — otherwise the outbound link to the source can't be
 	// verified against the source CA.
-	conf := renderValkeyConf(vc, "")
+	conf := renderValkeyConf(vc)
 	if !strings.Contains(conf, "tls-ca-cert-file "+dataMountPath+"/ca-bundle.crt") {
 		t.Errorf("tls-ca-cert-file must target the combined bundle\n%s", conf)
 	}
@@ -1313,31 +1306,31 @@ func TestRenderValkeyConfVersionGatedDirectives(t *testing.T) {
 	// cluster-allow-replica-migration no — every Cluster, any version (closes the
 	// C3/C4 emptied-primary auto-demote race).
 	for _, img := range []string{"valkey/valkey:8.0", "valkey/valkey:9.1"} {
-		if !strings.Contains(renderValkeyConf(mk(img, false), ""), "cluster-allow-replica-migration no") {
+		if !strings.Contains(renderValkeyConf(mk(img, false)), "cluster-allow-replica-migration no") {
 			t.Errorf("%s: must always disable replica auto-migration for Cluster", img)
 		}
 	}
 	// shutdown-on-sigterm failover — only >= 9.0 (8.x fatals on the value).
-	if c := renderValkeyConf(mk("valkey/valkey:8.0", false), ""); strings.Contains(c, "shutdown-on-sigterm") {
+	if c := renderValkeyConf(mk("valkey/valkey:8.0", false)); strings.Contains(c, "shutdown-on-sigterm") {
 		t.Errorf("8.0 must NOT set shutdown-on-sigterm failover (fatal on 8.x)\n%s", c)
 	}
-	if c := renderValkeyConf(mk("valkey/valkey:9.0", false), ""); !strings.Contains(c, "shutdown-on-sigterm failover") {
+	if c := renderValkeyConf(mk("valkey/valkey:9.0", false)); !strings.Contains(c, "shutdown-on-sigterm failover") {
 		t.Errorf("9.0 must set shutdown-on-sigterm failover\n%s", c)
 	}
 	// tls-auto-reload-interval — only >= 9.1 AND TLS on.
-	if c := renderValkeyConf(mk("valkey/valkey:9.1", false), ""); strings.Contains(c, "tls-auto-reload-interval") {
+	if c := renderValkeyConf(mk("valkey/valkey:9.1", false)); strings.Contains(c, "tls-auto-reload-interval") {
 		t.Errorf("no TLS → no tls-auto-reload-interval\n%s", c)
 	}
-	if c := renderValkeyConf(mk("valkey/valkey:9.0", true), ""); strings.Contains(c, "tls-auto-reload-interval") {
+	if c := renderValkeyConf(mk("valkey/valkey:9.0", true)); strings.Contains(c, "tls-auto-reload-interval") {
 		t.Errorf("9.0 (< 9.1) must NOT set tls-auto-reload-interval (fatal on 9.0)\n%s", c)
 	}
-	if c := renderValkeyConf(mk("valkey/valkey:9.1", true), ""); !strings.Contains(c, "tls-auto-reload-interval 3600") {
+	if c := renderValkeyConf(mk("valkey/valkey:9.1", true)); !strings.Contains(c, "tls-auto-reload-interval 3600") {
 		t.Errorf("9.1 + TLS must set tls-auto-reload-interval\n%s", c)
 	}
 	// Non-Cluster topology gets none of the cluster-* directives.
 	std := minimalCR()
 	std.Spec.Image = "valkey/valkey:9.1"
-	if c := renderValkeyConf(std, ""); strings.Contains(c, "shutdown-on-sigterm") || strings.Contains(c, "cluster-allow-replica-migration") {
+	if c := renderValkeyConf(std); strings.Contains(c, "shutdown-on-sigterm") || strings.Contains(c, "cluster-allow-replica-migration") {
 		t.Errorf("non-Cluster must not get cluster directives\n%s", c)
 	}
 }
@@ -1357,19 +1350,19 @@ func TestRenderValkeyConfClusterConfigSaveBehavior(t *testing.T) {
 		return vc
 	}
 	const want = "cluster-config-save-behavior best-effort"
-	if c := renderValkeyConf(mk(cachev1beta1.TopologyCluster, "valkey/valkey:9.1", true), ""); !strings.Contains(c, want) {
+	if c := renderValkeyConf(mk(cachev1beta1.TopologyCluster, "valkey/valkey:9.1", true)); !strings.Contains(c, want) {
 		t.Errorf("Cluster + memory + 9.1 must set %q\n%s", want, c)
 	}
 	// gate: 8.x fatals on the directive.
-	if c := renderValkeyConf(mk(cachev1beta1.TopologyCluster, "valkey/valkey:8.0", true), ""); strings.Contains(c, want) {
+	if c := renderValkeyConf(mk(cachev1beta1.TopologyCluster, "valkey/valkey:8.0", true)); strings.Contains(c, want) {
 		t.Errorf("8.0 must NOT set %q (fatal on 8.x)\n%s", want, c)
 	}
 	// durable PVC (no memory storage) keeps the safe sync default.
-	if c := renderValkeyConf(mk(cachev1beta1.TopologyCluster, "valkey/valkey:9.1", false), ""); strings.Contains(c, want) {
+	if c := renderValkeyConf(mk(cachev1beta1.TopologyCluster, "valkey/valkey:9.1", false)); strings.Contains(c, want) {
 		t.Errorf("PVC-backed Cluster must keep sync (no %q)\n%s", want, c)
 	}
 	// non-Cluster has no cluster-config file at all.
-	if c := renderValkeyConf(mk(cachev1beta1.TopologyReplication, "valkey/valkey:9.1", true), ""); strings.Contains(c, want) {
+	if c := renderValkeyConf(mk(cachev1beta1.TopologyReplication, "valkey/valkey:9.1", true)); strings.Contains(c, want) {
 		t.Errorf("non-Cluster must not set %q\n%s", want, c)
 	}
 }
@@ -1384,20 +1377,20 @@ func TestRenderValkeyConfHashSeed(t *testing.T) {
 		return vc
 	}
 	const uid = "3f2b1c4d-0000-4000-8000-abcdefabcdef"
-	c := renderValkeyConf(mk("valkey/valkey:9.1", uid), "")
+	c := renderValkeyConf(mk("valkey/valkey:9.1", uid))
 	if !strings.Contains(c, `hash-seed "`+uid+`"`) {
 		t.Errorf("9.1 must pin hash-seed from the CR UID\n%s", c)
 	}
 	// stable across renders: an immutable directive must not drift per pod/restart
-	if c2 := renderValkeyConf(mk("valkey/valkey:9.1", uid), ""); c2 != c {
+	if c2 := renderValkeyConf(mk("valkey/valkey:9.1", uid)); c2 != c {
 		t.Error("hash-seed render must be deterministic for the same CR")
 	}
 	// gate: 8.x fatals on the unknown directive.
-	if c := renderValkeyConf(mk("valkey/valkey:8.0", uid), ""); strings.Contains(c, "hash-seed") {
+	if c := renderValkeyConf(mk("valkey/valkey:8.0", uid)); strings.Contains(c, "hash-seed") {
 		t.Errorf("8.0 must NOT set hash-seed (fatal on 8.x)\n%s", c)
 	}
 	// no UID (bare object) → nothing to derive a stable seed from.
-	if c := renderValkeyConf(mk("valkey/valkey:9.1", ""), ""); strings.Contains(c, "hash-seed") {
+	if c := renderValkeyConf(mk("valkey/valkey:9.1", "")); strings.Contains(c, "hash-seed") {
 		t.Errorf("empty UID must not render hash-seed\n%s", c)
 	}
 }
@@ -1414,15 +1407,15 @@ func TestRenderValkeyConfShutdownSafe(t *testing.T) {
 		vc.Spec.Image = image
 		return vc
 	}
-	if c := renderValkeyConf(mk(cachev1beta1.ProfileDurable, "valkey/valkey:9.0"), ""); !strings.Contains(c, "shutdown-on-sigterm failover safe") {
+	if c := renderValkeyConf(mk(cachev1beta1.ProfileDurable, "valkey/valkey:9.0")); !strings.Contains(c, "shutdown-on-sigterm failover safe") {
 		t.Errorf("Durable Cluster on 9.0 must add the safe token\n%s", c)
 	}
-	cache := renderValkeyConf(mk(cachev1beta1.ProfileCache, "valkey/valkey:9.0"), "")
+	cache := renderValkeyConf(mk(cachev1beta1.ProfileCache, "valkey/valkey:9.0"))
 	if !strings.Contains(cache, "shutdown-on-sigterm failover\n") || strings.Contains(cache, "failover safe") {
 		t.Errorf("Cache must stay on failover alone (safe would stall a drain)\n%s", cache)
 	}
 	// gate: neither token exists on 8.x.
-	if c := renderValkeyConf(mk(cachev1beta1.ProfileDurable, "valkey/valkey:8.0"), ""); strings.Contains(c, "shutdown-on-sigterm") {
+	if c := renderValkeyConf(mk(cachev1beta1.ProfileDurable, "valkey/valkey:8.0")); strings.Contains(c, "shutdown-on-sigterm") {
 		t.Errorf("8.0 must NOT set shutdown-on-sigterm\n%s", c)
 	}
 }
@@ -1437,15 +1430,15 @@ func TestRenderValkeyConfLogFormat(t *testing.T) {
 		}
 		return vc
 	}
-	if c := renderValkeyConf(mk("valkey/valkey:9.1", "json"), ""); !strings.Contains(c, "log-format json") {
+	if c := renderValkeyConf(mk("valkey/valkey:9.1", "json")); !strings.Contains(c, "log-format json") {
 		t.Errorf("9.1 + logging.format=json must set log-format json\n%s", c)
 	}
 	// gate: unsupported value fatals older servers.
-	if c := renderValkeyConf(mk("valkey/valkey:8.0", "json"), ""); strings.Contains(c, "log-format") {
+	if c := renderValkeyConf(mk("valkey/valkey:8.0", "json")); strings.Contains(c, "log-format") {
 		t.Errorf("8.0 must NOT set log-format (fatal on 8.x)\n%s", c)
 	}
 	// unset → operator renders nothing (Valkey default).
-	if c := renderValkeyConf(mk("valkey/valkey:9.1", ""), ""); strings.Contains(c, "log-format") {
+	if c := renderValkeyConf(mk("valkey/valkey:9.1", "")); strings.Contains(c, "log-format") {
 		t.Errorf("no logging.format → no log-format directive\n%s", c)
 	}
 }
@@ -1510,26 +1503,26 @@ func TestRenderValkeyConfReplicaValidityFactor(t *testing.T) {
 	// replica can still win an election (avoids a stuck shard). Any Valkey
 	// version — old, stable directive, no version gate.
 	for _, img := range []string{"valkey/valkey:8.0", "valkey/valkey:9.1"} {
-		if c := renderValkeyConf(mk(cachev1beta1.ProfileCache, cachev1beta1.TopologyCluster, img), ""); !strings.Contains(c, "cluster-replica-validity-factor 0") {
+		if c := renderValkeyConf(mk(cachev1beta1.ProfileCache, cachev1beta1.TopologyCluster, img)); !strings.Contains(c, "cluster-replica-validity-factor 0") {
 			t.Errorf("%s Cache/Cluster must set cluster-replica-validity-factor 0\n%s", img, c)
 		}
 	}
 
 	// Durable keeps the default gate (nothing emitted): promoting an
 	// arbitrarily-stale replica would silently lose acknowledged writes.
-	if c := renderValkeyConf(mk(cachev1beta1.ProfileDurable, cachev1beta1.TopologyCluster, ""), ""); strings.Contains(c, "cluster-replica-validity-factor") {
+	if c := renderValkeyConf(mk(cachev1beta1.ProfileDurable, cachev1beta1.TopologyCluster, "")); strings.Contains(c, "cluster-replica-validity-factor") {
 		t.Errorf("Durable/Cluster must NOT override the validity gate\n%s", c)
 	}
 
 	// Only Cluster topology gets the directive.
-	if c := renderValkeyConf(mk(cachev1beta1.ProfileCache, cachev1beta1.TopologyReplication, ""), ""); strings.Contains(c, "cluster-replica-validity-factor") {
+	if c := renderValkeyConf(mk(cachev1beta1.ProfileCache, cachev1beta1.TopologyReplication, "")); strings.Contains(c, "cluster-replica-validity-factor") {
 		t.Errorf("non-Cluster must not get cluster-replica-validity-factor\n%s", c)
 	}
 
 	// spec.config overrides the operator default (rendered last → wins).
 	over := mk(cachev1beta1.ProfileCache, cachev1beta1.TopologyCluster, "")
 	over.Spec.Config = map[string]string{"cluster-replica-validity-factor": "10"}
-	if c := renderValkeyConf(over, ""); !strings.Contains(c, "cluster-replica-validity-factor 10") {
+	if c := renderValkeyConf(over); !strings.Contains(c, "cluster-replica-validity-factor 10") {
 		t.Errorf("spec.config must be able to override the validity factor\n%s", c)
 	}
 }
@@ -1756,7 +1749,7 @@ func TestRenderReplicationUser(t *testing.T) {
 		cachev1beta1.TopologyReplication, cachev1beta1.TopologyCluster, cachev1beta1.TopologySentinel,
 	} {
 		vc := mk(topo)
-		conf := renderValkeyConf(vc, "secret")
+		conf := renderValkeyConf(vc)
 		if !strings.Contains(conf, "masteruser replicator") {
 			t.Errorf("%s: valkey.conf must set masteruser replicator\n%s", topo, conf)
 		}
@@ -1767,7 +1760,7 @@ func TestRenderReplicationUser(t *testing.T) {
 
 	// Standalone has no replicas: no replication user, no masteruser.
 	std := mk(cachev1beta1.TopologyStandalone)
-	conf := renderValkeyConf(std, "secret")
+	conf := renderValkeyConf(std)
 	if strings.Contains(conf, "masteruser") {
 		t.Errorf("Standalone must not set masteruser\n%s", conf)
 	}

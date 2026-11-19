@@ -82,7 +82,7 @@ func (r *ValkeyClusterReconciler) reconcilePasswordRotation(ctx context.Context,
 	if oldPw == "" {
 		return false, nil
 	}
-	newPw, err := generatePassword(32)
+	newPw, err := generatePassword()
 	if err != nil {
 		return false, err
 	}

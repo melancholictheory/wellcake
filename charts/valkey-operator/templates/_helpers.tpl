@@ -72,3 +72,23 @@ Whether RBAC is namespace-scoped (either rbac.scope=namespace or watchNamespace 
 {{- define "valkey-operator.namespaceScoped" -}}
 {{- if or (eq .Values.rbac.scope "namespace") .Values.watchNamespace -}}true{{- else -}}false{{- end -}}
 {{- end }}
+
+{{/* Keep the effective chart mode aligned with existing extraArgs overrides. */}}
+{{- define "valkey-operator.metricsSecure" -}}
+{{- $secure := true -}}
+{{- if hasKey .Values.metrics "secure" -}}
+  {{- $secure = .Values.metrics.secure -}}
+{{- end -}}
+{{- range .Values.extraArgs -}}
+  {{- if regexMatch "^--?metrics-secure($|=(1|t|T|true|TRUE|True)$)" . -}}
+    {{- $secure = true -}}
+  {{- else if regexMatch "^--?metrics-secure=(0|f|F|false|FALSE|False)$" . -}}
+    {{- $secure = false -}}
+  {{- end -}}
+{{- end -}}
+{{- $secure -}}
+{{- end -}}
+
+{{- define "valkey-operator.metricsReaderName" -}}
+{{- printf "%s-%s-metrics-reader" .Release.Namespace (include "valkey-operator.fullname" .) -}}
+{{- end -}}

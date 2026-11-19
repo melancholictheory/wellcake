@@ -46,6 +46,35 @@ func proactiveRolloutEnabled(vc *cachev1beta1.ValkeyCluster) bool {
 	return err == nil && v
 }
 
+// rolloutHeld reports whether the cluster carries
+// `valkey.wellcake.io/rollout-hold: "true"`. Only the proactive rollout honours
+// it: without proactive-rollout the StatefulSet controller rolls the pods.
+func rolloutHeld(vc *cachev1beta1.ValkeyCluster) bool {
+	v, err := strconv.ParseBool(vc.Annotations[rolloutHoldAnnotation])
+	return err == nil && v
+}
+
+// countStale returns how many pods are off the desired STS revision.
+func countStale(pods []rolloutPod, desiredRevision string) int {
+	n := 0
+	for _, p := range pods {
+		if p.revision != desiredRevision {
+			n++
+		}
+	}
+	return n
+}
+
+// logRolloutHeld records that the rollout-hold annotation keeps stale pods on
+// their current revision. Silent once nothing is left to roll.
+func logRolloutHeld(ctx context.Context, vc *cachev1beta1.ValkeyCluster, stalePods int) {
+	if stalePods == 0 {
+		return
+	}
+	logf.FromContext(ctx).Info("proactive rollout held by the "+rolloutHoldAnnotation+" annotation",
+		"name", vc.Name, "stalePods", stalePods)
+}
+
 type rolloutPod struct {
 	name     string
 	ordinal  int32
@@ -128,6 +157,12 @@ func (r *ValkeyClusterReconciler) driveReplicationRollout(
 	pods, err := r.listRolloutPods(ctx, vc)
 	if err != nil {
 		return primary, false, err
+	}
+	// A held cluster is never in progress, whatever state its pods are in, so
+	// the caller runs reactive failover as on a steady cluster.
+	if rolloutHeld(vc) {
+		logRolloutHeld(ctx, vc, countStale(pods, desiredRevision))
+		return primary, false, nil
 	}
 	// Wait until the full set exists before reasoning about a rollout.
 	if int32(len(pods)) < totalReplicas(vc) {
@@ -366,6 +401,10 @@ func (r *ValkeyClusterReconciler) driveClusterRollout(
 	pods, err := r.listRolloutPods(ctx, vc)
 	if err != nil {
 		return false, err
+	}
+	if rolloutHeld(vc) {
+		logRolloutHeld(ctx, vc, countStale(pods, desiredRevision))
+		return false, nil
 	}
 	if int32(len(pods)) < totalReplicas(vc) {
 		return true, nil

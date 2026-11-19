@@ -27,7 +27,6 @@ import (
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -207,17 +206,12 @@ func main() {
 		HealthProbeBindAddress: probeAddr,
 		Cache: cache.Options{
 			DefaultNamespaces: watchNS,
-			// Scope the Pod cache to our own data-plane pods. The controller
-			// watches Pods only to react fast to a primary loss (see the Pod
-			// Watches in SetupWithManager) and never reads foreign pods. Without
-			// this selector the manager would cache EVERY pod in the watched
-			// namespaces — a real memory + event cost at 500+ instances
-			// (design-review Q3/SC1). labelsFor() stamps this label on every pod.
-			ByObject: map[client.Object]cache.ByObject{
-				&corev1.Pod{}: {
-					Label: labels.SelectorFromSet(labels.Set{"app.kubernetes.io/managed-by": "valkey-operator"}),
-				},
-			},
+			ByObject:          controller.ManagedObjectCache(),
+		},
+		Client: client.Options{
+			// Secret watches cache metadata only. Bypass the cache for typed
+			// reads so their first Get cannot start a full Secret informer.
+			Cache: &client.CacheOptions{DisableFor: []client.Object{&corev1.Secret{}}},
 		},
 		LeaderElection:   enableLeaderElection,
 		LeaderElectionID: "1e0a58e3.wellcake.io",
@@ -239,7 +233,7 @@ func main() {
 	}
 
 	if err := (&controller.ValkeyClusterReconciler{
-		Client:                  mgr.GetClient(),
+		Client:                  controller.WithManagedCacheFallback(mgr.GetClient(), mgr.GetAPIReader()),
 		APIReader:               mgr.GetAPIReader(),
 		Scheme:                  mgr.GetScheme(),
 		MaxConcurrentReconciles: maxConcurrentReconciles,
