@@ -54,7 +54,7 @@ Short names: `vk`, `vkc`. Printer columns: `Topology`, `Replicas`,
 | `metrics.serviceMonitor`      | bool                       | `false`        | Creates a ServiceMonitor (Prometheus Operator) via unstructured; if the CRDs are not installed it is simply skipped. |
 | `metrics.resources`           | k8s ResourceRequirements   | —              | Applied to the exporter sidecar. Unset → no requests or limits. Changing it rolls the data pods. |
 | `metrics.sentinel`            | bool                       | `false`        | Sentinel topology, with `metrics.enabled`: adds the exporter to the Sentinel pods (`redis_sentinel_*` metrics), scraped through the `sentinel-metrics` port of the Sentinel Service. Changing it rolls the Sentinel pods. With auth enabled, the Sentinel exporter uses a dedicated password that stays valid through `rotate-password`. |
-| `config`                      | map[string]string          | —              | Arbitrary Valkey directives, appended to `valkey.conf`. |
+| `config`                      | map[string]string          | —              | Arbitrary Valkey directives, appended to `valkey.conf`. `save` replaces the snapshot schedule of `storage.mode`. |
 | `nodeSelector` / `tolerations`| standard                   | —              | Data pods and Sentinel pods. |
 | `affinity`                    | *corev1.Affinity           | hostname anti-affinity | Data pods. Sentinel pods take only its `nodeAffinity`, on top of the default anti-affinity. |
 | `topologySpreadConstraints`   | []corev1.TopologySpreadConstraint | zone spread, ScheduleAnyway | Data pods. Sentinel pods keep the default. |
