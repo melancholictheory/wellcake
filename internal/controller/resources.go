@@ -106,6 +106,10 @@ const (
 	storageModeBoth = "both"
 	storageModeNone = "none"
 
+	// defaultSaveSchedule is the RDB snapshot schedule of the rdb and both
+	// modes, unless spec.config sets save.
+	defaultSaveSchedule = "3600 1 300 100 60 10000"
+
 	// Shared identifiers / well-known values.
 	secretKeyPassword = "password"
 	appValkey         = "valkey"
@@ -584,17 +588,7 @@ func renderValkeyConf(vc *cachev1beta1.ValkeyCluster) string {
 	}
 
 	// Profile-driven persistence defaults; explicit Storage.Mode overrides.
-	mode := persistenceMode(vc)
-	switch mode {
-	case storageModeAOF:
-		fmt.Fprintf(&b, "appendonly yes\nsave \"\"\n")
-	case storageModeBoth:
-		fmt.Fprintf(&b, "appendonly yes\nsave 3600 1 300 100 60 10000\n")
-	case storageModeNone:
-		fmt.Fprintf(&b, "appendonly no\nsave \"\"\n")
-	default: // rdb
-		fmt.Fprintf(&b, "appendonly no\nsave 3600 1 300 100 60 10000\n")
-	}
+	b.WriteString(renderPersistenceConf(vc))
 
 	// Profile-driven defaults for eviction & maxmemory unless overridden by Config.
 	cfg := vc.Spec.Config
@@ -638,6 +632,25 @@ func renderValkeyConf(vc *cachev1beta1.ValkeyCluster) string {
 		fmt.Fprintf(&b, "%s %s\n", k, cfg[k])
 	}
 	return b.String()
+}
+
+// renderPersistenceConf returns the appendonly and save directives of the
+// cluster's persistence mode. spec.config.save replaces the mode's snapshot
+// schedule: valkey.conf adds up the save lines after the first one, so writing
+// the mode's schedule as well would keep it next to the user's.
+func renderPersistenceConf(vc *cachev1beta1.ValkeyCluster) string {
+	mode := persistenceMode(vc)
+	conf := "appendonly no\n"
+	if mode == storageModeAOF || mode == storageModeBoth {
+		conf = "appendonly yes\n"
+	}
+	if _, ok := vc.Spec.Config["save"]; ok {
+		return conf
+	}
+	if mode == storageModeAOF || mode == storageModeNone {
+		return conf + "save \"\"\n"
+	}
+	return conf + "save " + defaultSaveSchedule + "\n"
 }
 
 // persistenceMode returns the effective persistence mode for this cluster.

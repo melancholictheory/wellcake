@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -332,6 +333,43 @@ func TestRenderValkeyConfHasProfileDefaults(t *testing.T) {
 				t.Errorf("missing aclfile directive")
 			}
 		})
+	}
+}
+
+func TestRenderValkeyConfSaveSchedule(t *testing.T) {
+	// valkey.conf adds up the save lines after the first one, so the conf must
+	// hold exactly one: the mode's schedule, or spec.config.save in its place.
+	const custom = "900 1 300 10"
+	for _, tc := range []struct{ mode, appendonly, schedule string }{
+		{"rdb", "no", defaultSaveSchedule},
+		{"both", "yes", defaultSaveSchedule},
+		{"aof", "yes", `""`},
+		{"none", "no", `""`},
+	} {
+		for _, configSave := range []string{"", custom} {
+			t.Run(tc.mode+"/"+configSave, func(t *testing.T) {
+				vc := minimalCR()
+				vc.Spec.Storage = &cachev1beta1.StorageSpec{Mode: tc.mode}
+				want := tc.schedule
+				if configSave != "" {
+					vc.Spec.Config = map[string]string{"save": configSave}
+					want = configSave
+				}
+				conf := renderValkeyConf(vc)
+				var saves []string
+				for line := range strings.SplitSeq(conf, "\n") {
+					if strings.HasPrefix(line, "save ") {
+						saves = append(saves, line)
+					}
+				}
+				if !slices.Equal(saves, []string{"save " + want}) {
+					t.Errorf("save lines = %q, want [%q]\n%s", saves, "save "+want, conf)
+				}
+				if !strings.Contains(conf, "\nappendonly "+tc.appendonly+"\n") {
+					t.Errorf("missing appendonly %s\n%s", tc.appendonly, conf)
+				}
+			})
+		}
 	}
 }
 
