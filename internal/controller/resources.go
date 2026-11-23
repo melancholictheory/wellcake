@@ -637,14 +637,16 @@ func renderValkeyConf(vc *cachev1beta1.ValkeyCluster) string {
 // renderPersistenceConf returns the appendonly and save directives of the
 // cluster's persistence mode. spec.config.save replaces the mode's snapshot
 // schedule: valkey.conf adds up the save lines after the first one, so writing
-// the mode's schedule as well would keep it next to the user's.
+// the mode's schedule as well would keep it next to the user's. A blank
+// spec.config.save (empty or only spaces) keeps the mode's schedule: its bare
+// save line changes nothing.
 func renderPersistenceConf(vc *cachev1beta1.ValkeyCluster) string {
 	mode := persistenceMode(vc)
 	conf := "appendonly no\n"
 	if mode == storageModeAOF || mode == storageModeBoth {
 		conf = "appendonly yes\n"
 	}
-	if _, ok := vc.Spec.Config["save"]; ok {
+	if strings.TrimSpace(vc.Spec.Config["save"]) != "" {
 		return conf
 	}
 	if mode == storageModeAOF || mode == storageModeNone {

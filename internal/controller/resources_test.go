@@ -337,8 +337,10 @@ func TestRenderValkeyConfHasProfileDefaults(t *testing.T) {
 }
 
 func TestRenderValkeyConfSaveSchedule(t *testing.T) {
-	// valkey.conf adds up the save lines after the first one, so the conf must
-	// hold exactly one: the mode's schedule, or spec.config.save in its place.
+	// valkey.conf adds up the save lines after the first one, so the mode's
+	// schedule must not be written next to spec.config.save. A blank
+	// spec.config.save (empty or only spaces) keeps the mode's schedule: its
+	// bare save line changes nothing, and '""' turns snapshots off.
 	const custom = "900 1 300 10"
 	for _, tc := range []struct{ mode, appendonly, schedule string }{
 		{"rdb", "no", defaultSaveSchedule},
@@ -346,14 +348,22 @@ func TestRenderValkeyConfSaveSchedule(t *testing.T) {
 		{"aof", "yes", `""`},
 		{"none", "no", `""`},
 	} {
-		for _, configSave := range []string{"", custom} {
-			t.Run(tc.mode+"/"+configSave, func(t *testing.T) {
+		for _, cs := range []struct {
+			name, save string
+			set        bool
+			want       []string
+		}{
+			{"unset", "", false, []string{"save " + tc.schedule}},
+			{"blank", "", true, []string{"save " + tc.schedule, "save "}},
+			{"spaces", "  ", true, []string{"save " + tc.schedule, "save   "}},
+			{"custom", custom, true, []string{"save " + custom}},
+			{"disabled", `""`, true, []string{`save ""`}},
+		} {
+			t.Run(tc.mode+"/"+cs.name, func(t *testing.T) {
 				vc := minimalCR()
 				vc.Spec.Storage = &cachev1beta1.StorageSpec{Mode: tc.mode}
-				want := tc.schedule
-				if configSave != "" {
-					vc.Spec.Config = map[string]string{"save": configSave}
-					want = configSave
+				if cs.set {
+					vc.Spec.Config = map[string]string{"save": cs.save}
 				}
 				conf := renderValkeyConf(vc)
 				var saves []string
@@ -362,8 +372,8 @@ func TestRenderValkeyConfSaveSchedule(t *testing.T) {
 						saves = append(saves, line)
 					}
 				}
-				if !slices.Equal(saves, []string{"save " + want}) {
-					t.Errorf("save lines = %q, want [%q]\n%s", saves, "save "+want, conf)
+				if !slices.Equal(saves, cs.want) {
+					t.Errorf("save lines = %q, want %q\n%s", saves, cs.want, conf)
 				}
 				if !strings.Contains(conf, "\nappendonly "+tc.appendonly+"\n") {
 					t.Errorf("missing appendonly %s\n%s", tc.appendonly, conf)
