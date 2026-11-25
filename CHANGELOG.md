@@ -13,6 +13,13 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   go-redis sent `CLIENT MAINT_NOTIFICATIONS`, a Redis Cloud feature, on each
   RESP3 connection, and Valkey answered "unknown subcommand". The operator now
   turns it off.
+- With `proactive-rollout`, a change that grows `storage.size` and also rolls
+  the pods (resources, config, image, restart) no longer leaves a pod with its
+  filesystem at the old size. The operator expanded the PVCs and restarted the
+  first pod in the same reconcile; that pod mounted its volume during the
+  expansion and the CSI node expansion ran before the node saw the grown disk.
+  The rollout now waits for a PVC expansion it requested to finish, for at
+  most 2 minutes, before restarting a data pod or handing the primary over.
 
 ## [0.14.3]
 

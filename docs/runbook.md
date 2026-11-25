@@ -586,6 +586,18 @@ some CSI drivers — restart it explicitly (`kubectl valkey restart` or a
 rolling restart) if you need the space immediately. Shrinking is not
 supported (both CEL and the operator only grow).
 
+With `proactive-rollout`, the operator does not restart a data pod or hand
+the primary over while a PVC expansion it requested is in flight (PVC
+`status.capacity` below the request). A pod restarted during the expansion
+can come back with its filesystem still at the old size: the CSI node
+expansion may run before the node sees the grown disk, report success, and
+never run again. The wait lasts at most 2 minutes from the request
+(annotation `valkey.wellcake.io/resize-requested-at` on the PVC). After
+that, or if the expansion is reported infeasible, the rollout goes on and the
+operator logs the PVCs to check. To fix a filesystem left at the old size,
+delete that replica's PVC and then its pod: the StatefulSet recreates both,
+and the replica resyncs from the primary.
+
 ## Working with Cluster shards
 
 For the Cluster topology, `status.shardDetails` lists each shard with its
