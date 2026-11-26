@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -332,6 +333,53 @@ func TestRenderValkeyConfHasProfileDefaults(t *testing.T) {
 				t.Errorf("missing aclfile directive")
 			}
 		})
+	}
+}
+
+func TestRenderValkeyConfSaveSchedule(t *testing.T) {
+	// valkey.conf adds up the save lines after the first one, so the mode's
+	// schedule must not be written next to spec.config.save. A blank
+	// spec.config.save (empty or only spaces) keeps the mode's schedule: its
+	// bare save line changes nothing, and '""' turns snapshots off.
+	const custom = "900 1 300 10"
+	for _, tc := range []struct{ mode, appendonly, schedule string }{
+		{"rdb", "no", defaultSaveSchedule},
+		{"both", "yes", defaultSaveSchedule},
+		{"aof", "yes", `""`},
+		{"none", "no", `""`},
+	} {
+		for _, cs := range []struct {
+			name, save string
+			set        bool
+			want       []string
+		}{
+			{"unset", "", false, []string{"save " + tc.schedule}},
+			{"blank", "", true, []string{"save " + tc.schedule, "save "}},
+			{"spaces", "  ", true, []string{"save " + tc.schedule, "save   "}},
+			{"custom", custom, true, []string{"save " + custom}},
+			{"disabled", `""`, true, []string{`save ""`}},
+		} {
+			t.Run(tc.mode+"/"+cs.name, func(t *testing.T) {
+				vc := minimalCR()
+				vc.Spec.Storage = &cachev1beta1.StorageSpec{Mode: tc.mode}
+				if cs.set {
+					vc.Spec.Config = map[string]string{"save": cs.save}
+				}
+				conf := renderValkeyConf(vc)
+				var saves []string
+				for line := range strings.SplitSeq(conf, "\n") {
+					if strings.HasPrefix(line, "save ") {
+						saves = append(saves, line)
+					}
+				}
+				if !slices.Equal(saves, cs.want) {
+					t.Errorf("save lines = %q, want %q\n%s", saves, cs.want, conf)
+				}
+				if !strings.Contains(conf, "\nappendonly "+tc.appendonly+"\n") {
+					t.Errorf("missing appendonly %s\n%s", tc.appendonly, conf)
+				}
+			})
+		}
 	}
 }
 
