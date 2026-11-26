@@ -6,6 +6,8 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.15.0]
+
 ### Fixed
 
 - `spec.config.save` now replaces the snapshot schedule of the storage mode.
@@ -13,9 +15,9 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `storage.mode` `rdb` or `both` the operator's `save 3600 1 300 100 60 10000`
   stayed active next to the configured one: `save: "900 1 300 10"` gave
   `3600 1 300 100 60 10000 900 1 300 10`. The operator no longer writes its own
-  `save` line when `spec.config` sets one. A blank value (empty or only
-  spaces) keeps the mode's schedule; `'""'` turns snapshots off. A cluster that sets
-  `spec.config.save` gets a new `valkey.conf` and rolls once on upgrade.
+  `save` line when `spec.config.save` contains a schedule. A blank value
+  keeps the mode's schedule. Set `save: '""'` to turn snapshots off.
+  Clusters can roll on upgrade if their rendered configuration changes.
 - The operator no longer adds an error to the Valkey pods' `errorstat_ERR`
   each time it connects (every minute per pod on a healthy Sentinel cluster).
   go-redis sent `CLIENT MAINT_NOTIFICATIONS`, a Redis Cloud feature, on each
@@ -768,6 +770,7 @@ First public release of the operator. Highlights of the initial feature set:
 - CEL XValidation for immutable and conditional fields; config-hash-driven
   rolling restarts; version-gated Valkey 9.x resilience directives.
 
+[0.15.0]: https://github.com/melancholictheory/wellcake/releases/tag/v0.15.0
 [0.14.3]: https://github.com/melancholictheory/wellcake/releases/tag/v0.14.3
 [0.14.2]: https://github.com/melancholictheory/wellcake/releases/tag/v0.14.2
 [0.14.1]: https://github.com/melancholictheory/wellcake/releases/tag/v0.14.1
