@@ -232,23 +232,27 @@ func (r *ValkeyClusterReconciler) driveReplicationRollout(
 	if err != nil {
 		return primary, false, err
 	}
+	stale := countStale(pods, desiredRevision)
 	// A held cluster is never in progress, whatever state its pods are in, so
 	// the caller runs reactive failover as on a steady cluster.
 	if rolloutHeld(vc) {
-		logRolloutHeld(ctx, vc, countStale(pods, desiredRevision))
+		logRolloutHeld(ctx, vc, stale)
 		return primary, false, nil
 	}
+	// A resize pauses planned replacements. Check before the incomplete-set
+	// and readiness waits so the caller can still react to a failed primary.
+	incomplete := int32(len(pods)) < totalReplicas(vc)
+	if stale > 0 || incomplete {
+		if pending, err := r.waitForDataPVCResize(ctx, vc); err != nil || pending {
+			return primary, false, err
+		}
+	}
 	// Wait until the full set exists before reasoning about a rollout.
-	if int32(len(pods)) < totalReplicas(vc) {
+	if incomplete {
 		return primary, true, nil
 	}
 
 	action := nextRolloutStep(pods, desiredRevision, primary)
-	if action.kind == rolloutRollReplica || action.kind == rolloutPromote {
-		if pending, err := r.waitForDataPVCResize(ctx, vc); err != nil || pending {
-			return primary, true, err
-		}
-	}
 	switch action.kind {
 	case rolloutNone:
 		return primary, false, nil

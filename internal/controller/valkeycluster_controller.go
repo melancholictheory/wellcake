@@ -636,12 +636,17 @@ func (r *ValkeyClusterReconciler) ensurePVCSize(ctx context.Context, vc *cachev1
 	return nil
 }
 
-// listDataPVCs returns the cluster's data PVCs, without the Sentinel ones.
+// listDataPVCs reads data PVCs from the API so the rollout can see a resize
+// requested in the same reconcile. A stale read could also reset the wait timer.
 func (r *ValkeyClusterReconciler) listDataPVCs(
 	ctx context.Context, vc *cachev1beta1.ValkeyCluster,
 ) ([]corev1.PersistentVolumeClaim, error) {
 	var pvcs corev1.PersistentVolumeClaimList
-	if err := r.List(ctx, &pvcs, client.InNamespace(vc.Namespace),
+	reader := r.APIReader
+	if reader == nil {
+		reader = r.Client
+	}
+	if err := reader.List(ctx, &pvcs, client.InNamespace(vc.Namespace),
 		client.MatchingLabels{instanceLabel: vc.Name}); err != nil {
 		return nil, err
 	}
