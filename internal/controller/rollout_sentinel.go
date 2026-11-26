@@ -91,6 +91,11 @@ func (r *ValkeyClusterReconciler) driveSentinelRollout(
 			return true, nil
 		}
 		action := nextRolloutStep(dataPods, dataRev, master)
+		if action.kind == rolloutRollReplica || action.kind == rolloutPromote {
+			if pending, err := r.waitForDataPVCResize(ctx, vc); err != nil || pending {
+				return true, err
+			}
+		}
 		switch action.kind {
 		case rolloutWait:
 			return true, nil

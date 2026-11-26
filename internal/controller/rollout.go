@@ -75,6 +75,80 @@ func logRolloutHeld(ctx context.Context, vc *cachev1beta1.ValkeyCluster, stalePo
 		"name", vc.Name, "stalePods", stalePods)
 }
 
+// pvcResizeSettleTimeout bounds how long the proactive rollout waits for a data
+// PVC expansion requested by ensurePVCSize. Restarting a pod while its volume is
+// still being expanded can leave its filesystem at the old size: the CSI node
+// expansion may run before the node sees the grown block device, report
+// success, and never run again. Past the timeout the rollout goes on anyway,
+// so a failed or offline-only expansion delays it but never blocks it.
+const pvcResizeSettleTimeout = 2 * time.Minute
+
+// resizeRequestedAtAnnotation is the RFC 3339 time ensurePVCSize stamps on a
+// data PVC it expands; the rollout waits for that expansion from this time on.
+const resizeRequestedAtAnnotation = "valkey.wellcake.io/resize-requested-at"
+
+type pvcResizeState int
+
+const (
+	pvcResizeSettled pvcResizeState = iota // no operator-requested expansion in flight
+	pvcResizeWaiting                       // in flight, within pvcResizeSettleTimeout
+	pvcResizeOverdue                       // in flight past pvcResizeSettleTimeout, or failed
+)
+
+// dataPVCResizeState is the pure decision for one data PVC. Only an expansion
+// stamped by ensurePVCSize is waited for; it is done once status.capacity
+// reaches the request, i.e. after the node expanded the filesystem.
+func dataPVCResizeState(p *corev1.PersistentVolumeClaim, now time.Time) pvcResizeState {
+	at, err := time.Parse(time.RFC3339, p.Annotations[resizeRequestedAtAnnotation])
+	if err != nil {
+		return pvcResizeSettled
+	}
+	want := p.Spec.Resources.Requests[corev1.ResourceStorage]
+	got := p.Status.Capacity[corev1.ResourceStorage]
+	if got.Cmp(want) >= 0 {
+		return pvcResizeSettled
+	}
+	for _, s := range p.Status.AllocatedResourceStatuses {
+		if s == corev1.PersistentVolumeClaimControllerResizeInfeasible ||
+			s == corev1.PersistentVolumeClaimNodeResizeInfeasible {
+			return pvcResizeOverdue
+		}
+	}
+	if now.Sub(at) >= pvcResizeSettleTimeout {
+		return pvcResizeOverdue
+	}
+	return pvcResizeWaiting
+}
+
+// waitForDataPVCResize reports whether the proactive rollout must wait before
+// restarting a data pod or handing the primary over: true while a data PVC
+// expansion requested less than pvcResizeSettleTimeout ago is in flight.
+func (r *ValkeyClusterReconciler) waitForDataPVCResize(ctx context.Context, vc *cachev1beta1.ValkeyCluster) (bool, error) {
+	pvcs, err := r.listDataPVCs(ctx, vc)
+	if err != nil {
+		return false, err
+	}
+	log := logf.FromContext(ctx)
+	now := time.Now()
+	var overdue []string
+	for i := range pvcs {
+		switch dataPVCResizeState(&pvcs[i], now) {
+		case pvcResizeWaiting:
+			log.Info("proactive rollout: waiting for a data PVC expansion before restarting pods",
+				"name", vc.Name, "pvc", pvcs[i].Name)
+			return true, nil
+		case pvcResizeOverdue:
+			overdue = append(overdue, pvcs[i].Name)
+		}
+	}
+	if len(overdue) > 0 {
+		log.Info("proactive rollout: data PVC expansion not finished, restarting pods anyway; "+
+			"check the filesystem size of these volumes", "name", vc.Name, "pvcs", overdue,
+			"timeout", pvcResizeSettleTimeout.String())
+	}
+	return false, nil
+}
+
 type rolloutPod struct {
 	name     string
 	ordinal  int32
@@ -158,14 +232,23 @@ func (r *ValkeyClusterReconciler) driveReplicationRollout(
 	if err != nil {
 		return primary, false, err
 	}
+	stale := countStale(pods, desiredRevision)
 	// A held cluster is never in progress, whatever state its pods are in, so
 	// the caller runs reactive failover as on a steady cluster.
 	if rolloutHeld(vc) {
-		logRolloutHeld(ctx, vc, countStale(pods, desiredRevision))
+		logRolloutHeld(ctx, vc, stale)
 		return primary, false, nil
 	}
+	// A resize pauses planned replacements. Check before the incomplete-set
+	// and readiness waits so the caller can still react to a failed primary.
+	incomplete := int32(len(pods)) < totalReplicas(vc)
+	if stale > 0 || incomplete {
+		if pending, err := r.waitForDataPVCResize(ctx, vc); err != nil || pending {
+			return primary, false, err
+		}
+	}
 	// Wait until the full set exists before reasoning about a rollout.
-	if int32(len(pods)) < totalReplicas(vc) {
+	if incomplete {
 		return primary, true, nil
 	}
 
@@ -430,6 +513,12 @@ func (r *ValkeyClusterReconciler) driveClusterRollout(
 	}
 
 	action := nextClusterRolloutStep(pods, shards, desiredRevision)
+	if action.kind == clusterRolloutRollReplica || action.kind == clusterRolloutRollMaster ||
+		action.kind == clusterRolloutFailover {
+		if pending, err := r.waitForDataPVCResize(ctx, vc); err != nil || pending {
+			return true, err
+		}
+	}
 	switch action.kind {
 	case clusterRolloutNone:
 		return false, nil

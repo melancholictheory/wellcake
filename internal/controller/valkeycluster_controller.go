@@ -610,10 +610,45 @@ func (r *ValkeyClusterReconciler) ensurePVCSize(ctx context.Context, vc *cachev1
 	if desired.IsZero() {
 		return nil
 	}
-	var pvcs corev1.PersistentVolumeClaimList
-	if err := r.List(ctx, &pvcs, client.InNamespace(vc.Namespace),
-		client.MatchingLabels{instanceLabel: vc.Name}); err != nil {
+	pvcs, err := r.listDataPVCs(ctx, vc)
+	if err != nil {
 		return err
+	}
+	for i := range pvcs {
+		p := &pvcs[i]
+		cur := p.Spec.Resources.Requests[corev1.ResourceStorage]
+		if cur.Cmp(desired) >= 0 {
+			continue
+		}
+		patch := client.MergeFrom(p.DeepCopy())
+		p.Spec.Resources.Requests[corev1.ResourceStorage] = desired
+		// Stamp the request so the proactive rollout can wait for this expansion
+		// to finish before restarting the pod (waitForDataPVCResize).
+		if p.Annotations == nil {
+			p.Annotations = map[string]string{}
+		}
+		p.Annotations[resizeRequestedAtAnnotation] = time.Now().UTC().Format(time.RFC3339)
+		if err := r.Patch(ctx, p, patch); err != nil {
+			return fmt.Errorf("expand pvc %s: %w", p.Name, err)
+		}
+		logf.FromContext(ctx).Info("expanded data PVC", "pvc", p.Name, "size", desired.String())
+	}
+	return nil
+}
+
+// listDataPVCs reads data PVCs from the API so the rollout can see a resize
+// requested in the same reconcile. A stale read could also reset the wait timer.
+func (r *ValkeyClusterReconciler) listDataPVCs(
+	ctx context.Context, vc *cachev1beta1.ValkeyCluster,
+) ([]corev1.PersistentVolumeClaim, error) {
+	var pvcs corev1.PersistentVolumeClaimList
+	reader := r.APIReader
+	if reader == nil {
+		reader = r.Client
+	}
+	if err := reader.List(ctx, &pvcs, client.InNamespace(vc.Namespace),
+		client.MatchingLabels{instanceLabel: vc.Name}); err != nil {
+		return nil, err
 	}
 	// The instance-label selector also matches the Sentinel StatefulSet's PVCs —
 	// in Sentinel topology the data pods and the Sentinel monitors share the same
@@ -622,23 +657,13 @@ func (r *ValkeyClusterReconciler) ensurePVCSize(ctx context.Context, vc *cachev1
 	// not be grown to the data PVC size, so exclude them by name. (Their name is
 	// the only thing that distinguishes the two StatefulSets.)
 	sentinelPVCPrefix := dataVolumeName + "-" + sentinelStatefulSetName(vc) + "-"
+	out := make([]corev1.PersistentVolumeClaim, 0, len(pvcs.Items))
 	for i := range pvcs.Items {
-		p := &pvcs.Items[i]
-		if strings.HasPrefix(p.Name, sentinelPVCPrefix) {
-			continue
+		if !strings.HasPrefix(pvcs.Items[i].Name, sentinelPVCPrefix) {
+			out = append(out, pvcs.Items[i])
 		}
-		cur := p.Spec.Resources.Requests[corev1.ResourceStorage]
-		if cur.Cmp(desired) >= 0 {
-			continue
-		}
-		patch := client.MergeFrom(p.DeepCopy())
-		p.Spec.Resources.Requests[corev1.ResourceStorage] = desired
-		if err := r.Patch(ctx, p, patch); err != nil {
-			return fmt.Errorf("expand pvc %s: %w", p.Name, err)
-		}
-		logf.FromContext(ctx).Info("expanded data PVC", "pvc", p.Name, "size", desired.String())
 	}
-	return nil
+	return out, nil
 }
 
 // ensureMetricsServiceMonitor creates/updates a Prometheus Operator

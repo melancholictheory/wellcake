@@ -21,6 +21,10 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   go-redis sent `CLIENT MAINT_NOTIFICATIONS`, a Redis Cloud feature, on each
   RESP3 connection, and Valkey answered "unknown subcommand". The operator now
   turns it off.
+- With `proactive-rollout`, the operator waits up to 2 minutes for a data PVC
+  expansion it requested before starting another planned restart or primary
+  handover. This reduces the chance of mounting a volume before the CSI driver
+  has finished expanding it. Reactive failover stays enabled in Replication.
 
 ## [0.14.3]
 
