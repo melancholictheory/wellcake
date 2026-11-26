@@ -91,7 +91,7 @@ func TestRenderValkeyConfProfiles(t *testing.T) {
 
 	// Durable: noeviction, AOF on with save rules.
 	durable := renderValkeyConf(withMem(cachev1beta1.ProfileDurable, "1Gi"))
-	for _, want := range []string{"maxmemory-policy noeviction", "appendonly yes", "save 3600 1"} {
+	for _, want := range []string{"maxmemory-policy noeviction", "appendonly yes", "save " + defaultSaveSchedule} {
 		if !strings.Contains(durable, want) {
 			t.Errorf("durable conf missing %q\n%s", want, durable)
 		}
